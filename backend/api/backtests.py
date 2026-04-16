@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import List
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from backend.db import SessionLocal, query_kline
@@ -23,6 +23,15 @@ class BacktestCreate(BaseModel):
     end_date: str = Field(..., description="格式: YYYY-MM-DD")
     initial_capital: float = Field(default=1000000.0, ge=0)
     commission: float = Field(default=0.0003, ge=0, le=1)
+
+    @field_validator("start_date", "end_date")
+    @classmethod
+    def validate_date_format(cls, v: str) -> str:
+        try:
+            datetime.strptime(v, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("Invalid date format. Expected YYYY-MM-DD")
+        return v
 
 
 class BacktestResponse(BaseModel):

@@ -1,6 +1,6 @@
 """回测结果相关的 SQLAlchemy 模型"""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import Column, Date, DateTime, Numeric, ForeignKey, Integer, String, Text
@@ -30,7 +30,7 @@ class Backtest(Base):
     max_drawdown = Column(Numeric(10, 4), nullable=True)
     win_rate = Column(Numeric(10, 4), nullable=True)
     equity_curve = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     trades = relationship("Trade", back_populates="backtest", cascade="all, delete-orphan")
 

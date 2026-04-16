@@ -61,7 +61,7 @@ def import_kline(symbol: str, data: pd.DataFrame) -> int:
     data = data.sort_values("timestamp").drop_duplicates(subset=["timestamp"])
 
     # 创建或打开表
-    if table_name not in db.table_names():
+    if table_name not in db.list_tables():
         table = db.create_table(table_name, schema=KLINE_SCHEMA)
     else:
         table = db.open_table(table_name)
@@ -94,7 +94,7 @@ def query_kline(
     db = get_kline_db()
     table_name = get_table_name(symbol)
 
-    if table_name not in db.table_names():
+    if table_name not in db.list_tables():
         return pd.DataFrame()
 
     table = db.open_table(table_name)
@@ -124,7 +124,7 @@ def list_symbols() -> list[str]:
         标的代码列表
     """
     db = get_kline_db()
-    table_names = db.table_names()
+    table_names = db.list_tables()
 
     # 从表名提取标的代码
     symbols = []

@@ -1,11 +1,11 @@
 """策略管理 API"""
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from backend.db import SessionLocal
@@ -18,6 +18,32 @@ class StrategyCreate(BaseModel):
     name: str
     description: str = ""
     code: str
+
+    @field_validator("name")
+    @classmethod
+    def name_must_not_be_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("name must not be empty")
+        return v
+
+    @field_validator("code")
+    @classmethod
+    def code_must_not_be_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("code must not be empty")
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "name": "双均线策略",
+                    "description": "5日/20日均线交叉",
+                    "code": "def handle_bar(context): return []"
+                }
+            ]
+        }
+    }
 
 
 class StrategyUpdate(BaseModel):
@@ -83,7 +109,7 @@ def update_strategy(strategy_id: int, strategy: StrategyUpdate):
         if strategy.code is not None:
             db_strategy.code = strategy.code
 
-        db_strategy.updated_at = datetime.utcnow()
+        db_strategy.updated_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(db_strategy)
         return db_strategy

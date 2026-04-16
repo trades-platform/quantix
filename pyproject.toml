@@ -12,11 +12,13 @@ dependencies = [
     "numpy>=2.0",
     "typer>=0.15",
     "httpx>=0.28",
+    "python-multipart>=0.0.9",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pytest-cov>=4.0",
     "ruff>=0.9",
 ]
 
@@ -29,6 +31,17 @@ packages = ["backend"]
 
 [tool.ruff]
 line-length = 120
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q --strict-markers --tb=short"
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
 
 [project.scripts]
 quantix = "backend.cli.app:app"

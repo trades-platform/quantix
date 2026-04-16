@@ -39,8 +39,11 @@ def get_kline_data(symbol: str, start_date: str | None = None, end_date: str | N
         start_date: 开始日期 YYYY-MM-DD
         end_date: 结束日期 YYYY-MM-DD
     """
-    start_dt = datetime.strptime(start_date, "%Y-%m-%d") if start_date else None
-    end_dt = datetime.strptime(end_date, "%Y-%m-%d") if end_date else None
+    try:
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d") if start_date else None
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d") if end_date else None
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid date format: {e}")
 
     data = query_kline(symbol, start_dt, end_dt)
 
