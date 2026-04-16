@@ -1,0 +1,51 @@
+"""回测结果相关的 SQLAlchemy 模型"""
+
+from datetime import datetime
+from decimal import Decimal
+
+from sqlalchemy import Column, Date, DateTime, Decimal as SQLDecimal, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import DeclarativeBase, relationship
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Backtest(Base):
+    """回测结果模型"""
+
+    __tablename__ = "backtests"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    strategy_id = Column(Integer, ForeignKey("strategies.id"), nullable=False)
+    symbol = Column(String(20), nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    initial_capital = Column(SQLDecimal(15, 2), nullable=False)
+    commission = Column(SQLDecimal(8, 4), nullable=False)
+    status = Column(String(20), nullable=False, default="pending")
+    total_return = Column(SQLDecimal(10, 4), nullable=True)
+    annual_return = Column(SQLDecimal(10, 4), nullable=True)
+    sharpe_ratio = Column(SQLDecimal(10, 4), nullable=True)
+    max_drawdown = Column(SQLDecimal(10, 4), nullable=True)
+    win_rate = Column(SQLDecimal(10, 4), nullable=True)
+    equity_curve = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    trades = relationship("Trade", back_populates="backtest", cascade="all, delete-orphan")
+
+
+class Trade(Base):
+    """交易明细模型"""
+
+    __tablename__ = "trades"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    backtest_id = Column(Integer, ForeignKey("backtests.id"), nullable=False)
+    symbol = Column(String(20), nullable=False)
+    side = Column(String(10), nullable=False)
+    price = Column(SQLDecimal(15, 2), nullable=False)
+    quantity = Column(Integer, nullable=False)
+    timestamp = Column(DateTime, nullable=False)
+
+    backtest = relationship("Backtest", back_populates="trades")

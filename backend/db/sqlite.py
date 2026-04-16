@@ -5,7 +5,7 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.models.strategy import Base
+from backend.models import Base
 
 DB_PATH = Path(__file__).resolve().parents[2] / "data" / "app.db"
 

@@ -1,11 +1,10 @@
 """策略相关的 SQLAlchemy 模型"""
 
-from sqlalchemy import Column, Integer, String, Text
-from sqlalchemy.orm import DeclarativeBase
+from datetime import datetime
 
+from sqlalchemy import Column, DateTime, Integer, String, Text
 
-class Base(DeclarativeBase):
-    pass
+from backend.models.backtest import Base
 
 
 class Strategy(Base):
@@ -15,3 +14,5 @@ class Strategy(Base):
     name = Column(String(100), nullable=False)
     description = Column(Text, default="")
     code = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
