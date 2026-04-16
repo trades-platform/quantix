@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
-import { CandlestickChart, LineChart, MarkLineComponent, BarChart } from 'echarts/charts'
+import { CandlestickChart, LineChart, BarChart } from 'echarts/charts'
 import {
   TitleComponent,
   TooltipComponent,
@@ -16,7 +16,6 @@ use([
   CanvasRenderer,
   CandlestickChart,
   LineChart,
-  MarkLineComponent,
   BarChart,
   TitleComponent,
   TooltipComponent,

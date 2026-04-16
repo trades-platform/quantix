@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { strategyApi, dataApi, backtestApi } from '../api'
 
@@ -19,12 +19,36 @@ const form = ref({
   commission: 0.0003,
 })
 
+const formErrors = ref({
+  strategy_id: '',
+  symbol: '',
+  start_date: '',
+  end_date: '',
+  initial_capital: '',
+  commission: '',
+})
+
+// 快速预设
+const presets = [
+  { name: '近一个月', days: 30 },
+  { name: '近三个月', days: 90 },
+  { name: '近半年', days: 180 },
+  { name: '近一年', days: 365 },
+]
+
+const selectedStrategy = computed(() => {
+  return strategies.value.find((s) => s.id === form.value.strategy_id)
+})
+
 const fetchStrategies = async () => {
+  loading.value = true
   try {
     const response = await strategyApi.list()
     strategies.value = response.data
   } catch (error) {
     console.error('获取策略列表失败:', error)
+  } finally {
+    loading.value = false
   }
 }
 
@@ -37,17 +61,61 @@ const fetchSymbols = async () => {
   }
 }
 
-const runBacktest = async () => {
+const validateForm = () => {
+  let isValid = true
+  formErrors.value = {
+    strategy_id: '',
+    symbol: '',
+    start_date: '',
+    end_date: '',
+    initial_capital: '',
+    commission: '',
+  }
+
   if (!form.value.strategy_id) {
-    alert('请选择策略')
-    return
+    formErrors.value.strategy_id = '请选择策略'
+    isValid = false
   }
+
   if (!form.value.symbol) {
-    alert('请选择标的')
-    return
+    formErrors.value.symbol = '请选择标的'
+    isValid = false
   }
-  if (!form.value.start_date || !form.value.end_date) {
-    alert('请选择日期范围')
+
+  if (!form.value.start_date) {
+    formErrors.value.start_date = '请选择开始日期'
+    isValid = false
+  }
+
+  if (!form.value.end_date) {
+    formErrors.value.end_date = '请选择结束日期'
+    isValid = false
+  }
+
+  if (form.value.start_date && form.value.end_date) {
+    const start = new Date(form.value.start_date)
+    const end = new Date(form.value.end_date)
+    if (start >= end) {
+      formErrors.value.end_date = '结束日期必须晚于开始日期'
+      isValid = false
+    }
+  }
+
+  if (!form.value.initial_capital || form.value.initial_capital < 10000) {
+    formErrors.value.initial_capital = '初始资金不能少于 10,000 元'
+    isValid = false
+  }
+
+  if (form.value.commission < 0 || form.value.commission > 0.1) {
+    formErrors.value.commission = '手续费率必须在 0 到 10% 之间'
+    isValid = false
+  }
+
+  return isValid
+}
+
+const runBacktest = async () => {
+  if (!validateForm()) {
     return
   }
 
@@ -64,14 +132,24 @@ const runBacktest = async () => {
   }
 }
 
-// 设置默认日期范围
-const setDefaultDates = () => {
+const applyPreset = (days) => {
   const end = new Date()
   const start = new Date()
-  start.setFullYear(start.getFullYear() - 1)
+  start.setDate(start.getDate() - days)
 
   form.value.end_date = end.toISOString().split('T')[0]
   form.value.start_date = start.toISOString().split('T')[0]
+}
+
+const setDefaultDates = () => {
+  applyPreset(365)
+}
+
+const formatCurrency = (value) => {
+  return new Intl.NumberFormat('zh-CN', {
+    style: 'currency',
+    currency: 'CNY',
+  }).format(value)
 }
 
 onMounted(() => {
@@ -83,115 +161,247 @@ onMounted(() => {
 
 <template>
   <div class="p-8">
-    <h1 class="text-3xl font-bold text-gray-900">回测配置</h1>
-    <p class="mt-2 text-gray-600">配置参数并运行策略回测</p>
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold text-gray-900">回测配置</h1>
+      <p class="mt-2 text-gray-600">配置参数并运行策略回测</p>
+    </div>
 
-    <div class="mt-8 max-w-2xl">
-      <div class="bg-white rounded-lg shadow p-6">
-        <form @submit.prevent="runBacktest" class="space-y-6">
-          <!-- 策略选择 -->
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">选择策略</label>
-            <select
-              v-model="form.strategy_id"
-              class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              :disabled="loading"
-            >
-              <option value="">请选择策略</option>
-              <option v-for="strategy in strategies" :key="strategy.id" :value="strategy.id">
-                {{ strategy.name }}
-              </option>
-            </select>
-          </div>
-
-          <!-- 标的选择 -->
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">选择标的</label>
-            <select
-              v-model="form.symbol"
-              class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              :disabled="loading"
-            >
-              <option value="">请选择标的</option>
-              <option v-for="symbol in symbols" :key="symbol" :value="symbol">
-                {{ symbol }}
-              </option>
-            </select>
-          </div>
-
-          <!-- 日期范围 -->
-          <div class="grid grid-cols-2 gap-4">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <!-- 配置表单 -->
+      <div class="lg:col-span-2">
+        <div class="bg-white rounded-lg shadow p-6">
+          <form @submit.prevent="runBacktest" class="space-y-6">
+            <!-- 策略选择 -->
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-2">开始日期</label>
-              <input
-                v-model="form.start_date"
-                type="date"
+              <label class="block text-sm font-medium text-gray-700 mb-2">
+                选择策略 <span class="text-red-500">*</span>
+              </label>
+              <select
+                v-model="form.strategy_id"
                 class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
+                :class="{ 'border-red-500': formErrors.strategy_id }"
+                :disabled="loading"
+              >
+                <option value="">请选择策略</option>
+                <option v-for="strategy in strategies" :key="strategy.id" :value="strategy.id">
+                  {{ strategy.name }} - {{ strategy.description || '无描述' }}
+                </option>
+              </select>
+              <p v-if="formErrors.strategy_id" class="text-sm text-red-600 mt-1">
+                {{ formErrors.strategy_id }}
+              </p>
             </div>
+
+            <!-- 标的选择 -->
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-2">结束日期</label>
-              <input
-                v-model="form.end_date"
-                type="date"
+              <label class="block text-sm font-medium text-gray-700 mb-2">
+                选择标的 <span class="text-red-500">*</span>
+              </label>
+              <select
+                v-model="form.symbol"
                 class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
+                :class="{ 'border-red-500': formErrors.symbol }"
+                :disabled="loading"
+              >
+                <option value="">请选择标的</option>
+                <option v-for="symbol in symbols" :key="symbol" :value="symbol">
+                  {{ symbol }}
+                </option>
+              </select>
+              <p v-if="formErrors.symbol" class="text-sm text-red-600 mt-1">
+                {{ formErrors.symbol }}
+              </p>
             </div>
-          </div>
 
-          <!-- 初始资金 -->
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">初始资金</label>
-            <div class="relative">
-              <span class="absolute left-3 top-2 text-gray-500">¥</span>
-              <input
-                v-model.number="form.initial_capital"
-                type="number"
-                step="10000"
-                min="10000"
-                class="w-full pl-8 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
+            <!-- 日期范围 -->
+            <div>
+              <div class="flex justify-between items-center mb-2">
+                <label class="block text-sm font-medium text-gray-700">
+                  日期范围 <span class="text-red-500">*</span>
+                </label>
+                <div class="flex space-x-2">
+                  <button
+                    v-for="preset in presets"
+                    :key="preset.name"
+                    type="button"
+                    @click="applyPreset(preset.days)"
+                    class="text-xs px-2 py-1 border rounded hover:bg-gray-50"
+                  >
+                    {{ preset.name }}
+                  </button>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <input
+                    v-model="form.start_date"
+                    type="date"
+                    class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    :class="{ 'border-red-500': formErrors.start_date }"
+                  />
+                  <p v-if="formErrors.start_date" class="text-sm text-red-600 mt-1">
+                    {{ formErrors.start_date }}
+                  </p>
+                </div>
+                <div>
+                  <input
+                    v-model="form.end_date"
+                    type="date"
+                    class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    :class="{ 'border-red-500': formErrors.end_date }"
+                  />
+                  <p v-if="formErrors.end_date" class="text-sm text-red-600 mt-1">
+                    {{ formErrors.end_date }}
+                  </p>
+                </div>
+              </div>
             </div>
-          </div>
 
-          <!-- 手续费率 -->
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">手续费率</label>
-            <div class="relative">
-              <input
-                v-model.number="form.commission"
-                type="number"
-                step="0.0001"
-                min="0"
-                max="1"
-                class="w-full px-3 py-2 pr-12 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-              <span class="absolute right-3 top-2 text-gray-500">比例</span>
+            <!-- 初始资金 -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">
+                初始资金 <span class="text-red-500">*</span>
+              </label>
+              <div class="relative">
+                <span class="absolute left-3 top-2 text-gray-500">¥</span>
+                <input
+                  v-model.number="form.initial_capital"
+                  type="number"
+                  step="10000"
+                  min="10000"
+                  class="w-full pl-8 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  :class="{ 'border-red-500': formErrors.initial_capital }"
+                />
+              </div>
+              <p v-if="formErrors.initial_capital" class="text-sm text-red-600 mt-1">
+                {{ formErrors.initial_capital }}
+              </p>
+              <p v-else class="text-xs text-gray-500 mt-1">
+                建议初始资金不少于 10 万元
+              </p>
             </div>
-            <p class="text-xs text-gray-500 mt-1">默认 0.03%，即万分之三</p>
-          </div>
 
-          <!-- 提交按钮 -->
-          <div class="flex justify-end">
-            <button
-              type="submit"
-              :disabled="running"
-              class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-            >
-              {{ running ? '运行中...' : '运行回测' }}
-            </button>
-          </div>
-        </form>
+            <!-- 手续费率 -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">
+                手续费率 <span class="text-red-500">*</span>
+              </label>
+              <div class="relative">
+                <input
+                  v-model.number="form.commission"
+                  type="number"
+                  step="0.0001"
+                  min="0"
+                  max="0.1"
+                  class="w-full px-3 py-2 pr-12 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  :class="{ 'border-red-500': formErrors.commission }"
+                />
+                <span class="absolute right-3 top-2 text-gray-500">比例</span>
+              </div>
+              <p v-if="formErrors.commission" class="text-sm text-red-600 mt-1">
+                {{ formErrors.commission }}
+              </p>
+              <div class="flex space-x-2 mt-2">
+                <button
+                  type="button"
+                  @click="form.commission = 0.0003"
+                  class="text-xs px-2 py-1 border rounded hover:bg-gray-50"
+                  :class="{ 'bg-blue-50 border-blue-500': form.commission === 0.0003 }"
+                >
+                  万分之三
+                </button>
+                <button
+                  type="button"
+                  @click="form.commission = 0.0001"
+                  class="text-xs px-2 py-1 border rounded hover:bg-gray-50"
+                  :class="{ 'bg-blue-50 border-blue-500': form.commission === 0.0001 }"
+                >
+                  万分之一
+                </button>
+                <button
+                  type="button"
+                  @click="form.commission = 0.001"
+                  class="text-xs px-2 py-1 border rounded hover:bg-gray-50"
+                  :class="{ 'bg-blue-50 border-blue-500': form.commission === 0.001 }"
+                >
+                  千分之一
+                </button>
+              </div>
+            </div>
+
+            <!-- 提交按钮 -->
+            <div class="flex justify-end pt-4 border-t">
+              <button
+                type="submit"
+                :disabled="running"
+                class="bg-blue-600 text-white px-8 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center"
+              >
+                <svg v-if="running" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                {{ running ? '运行中...' : '运行回测' }}
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
 
-      <!-- 参数说明 -->
-      <div class="mt-6 bg-blue-50 rounded-lg p-4">
-        <h3 class="font-medium text-blue-900 mb-2">参数说明</h3>
-        <ul class="text-sm text-blue-800 space-y-1">
-          <li>• <strong>初始资金</strong>：回测账户的起始资金量</li>
-          <li>• <strong>手续费率</strong>：每笔交易的手续费比例，0.0003 表示万分之三</li>
-          <li>• <strong>日期范围</strong>：回测使用的历史数据时间段</li>
-        </ul>
+      <!-- 配置摘要和说明 -->
+      <div class="space-y-6">
+        <!-- 配置摘要 -->
+        <div class="bg-white rounded-lg shadow p-6">
+          <h3 class="font-semibold text-gray-900 mb-4">配置摘要</h3>
+          <div class="space-y-3 text-sm">
+            <div class="flex justify-between">
+              <span class="text-gray-600">策略:</span>
+              <span class="font-medium">{{ selectedStrategy?.name || '-' }}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">标的:</span>
+              <span class="font-medium">{{ form.symbol || '-' }}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">回测期间:</span>
+              <span class="font-medium">
+                {{ form.start_date }} 至 {{ form.end_date }}
+              </span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">初始资金:</span>
+              <span class="font-medium">{{ formatCurrency(form.initial_capital) }}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">手续费率:</span>
+              <span class="font-medium">{{ (form.commission * 10000).toFixed(1) }}‰</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 参数说明 -->
+        <div class="bg-blue-50 rounded-lg p-6">
+          <h3 class="font-medium text-blue-900 mb-3">参数说明</h3>
+          <ul class="text-sm text-blue-800 space-y-2">
+            <li class="flex">
+              <span class="mr-2">•</span>
+              <span><strong>初始资金</strong>：回测账户的起始资金，建议不少于 10 万元</span>
+            </li>
+            <li class="flex">
+              <span class="mr-2">•</span>
+              <span><strong>手续费率</strong>：每笔交易的手续费比例，A股默认万分之三</span>
+            </li>
+            <li class="flex">
+              <span class="mr-2">•</span>
+              <span><strong>日期范围</strong>：回测使用的历史数据时间段</span>
+            </li>
+          </ul>
+        </div>
+
+        <!-- 策略说明 -->
+        <div v-if="selectedStrategy" class="bg-gray-50 rounded-lg p-6">
+          <h3 class="font-medium text-gray-900 mb-2">策略说明</h3>
+          <p class="text-sm text-gray-600">{{ selectedStrategy.description || '暂无描述' }}</p>
+        </div>
       </div>
     </div>
   </div>
