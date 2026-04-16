@@ -2,13 +2,18 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { strategyApi, dataApi, backtestApi } from '../api'
+import { useBacktestStore } from '../stores/backtest'
+import { useNotificationStore } from '../stores/notification'
+import { storeToRefs } from 'pinia'
 
 const router = useRouter()
+const backtestStore = useBacktestStore()
+const { running } = storeToRefs(backtestStore)
+const notificationStore = useNotificationStore()
 
 const strategies = ref([])
 const symbols = ref([])
 const loading = ref(false)
-const running = ref(false)
 
 const form = ref({
   strategy_id: null,
@@ -28,7 +33,6 @@ const formErrors = ref({
   commission: '',
 })
 
-// 快速预设
 const presets = [
   { name: '近一个月', days: 30 },
   { name: '近三个月', days: 90 },
@@ -40,26 +44,19 @@ const selectedStrategy = computed(() => {
   return strategies.value.find((s) => s.id === form.value.strategy_id)
 })
 
-const fetchStrategies = async () => {
-  loading.value = true
-  try {
-    const response = await strategyApi.list()
-    strategies.value = response.data
-  } catch (error) {
-    console.error('获取策略列表失败:', error)
-  } finally {
-    loading.value = false
+const dateRangeError = computed(() => {
+  if (!form.value.start_date || !form.value.end_date) return ''
+  const start = new Date(form.value.start_date)
+  const end = new Date(form.value.end_date)
+  const daysDiff = Math.ceil((end - start) / (1000 * 60 * 60 * 24))
+  if (daysDiff < 7) {
+    return '回测期间至少需要7天'
   }
-}
-
-const fetchSymbols = async () => {
-  try {
-    const response = await dataApi.getSymbols()
-    symbols.value = response.data
-  } catch (error) {
-    console.error('获取标的列表失败:', error)
+  if (daysDiff > 365 * 5) {
+    return '回测期间不能超过5年'
   }
-}
+  return ''
+})
 
 const validateForm = () => {
   let isValid = true
@@ -98,16 +95,25 @@ const validateForm = () => {
     if (start >= end) {
       formErrors.value.end_date = '结束日期必须晚于开始日期'
       isValid = false
+    } else if (dateRangeError.value) {
+      formErrors.value.end_date = dateRangeError.value
+      isValid = false
     }
   }
 
   if (!form.value.initial_capital || form.value.initial_capital < 10000) {
     formErrors.value.initial_capital = '初始资金不能少于 10,000 元'
     isValid = false
+  } else if (form.value.initial_capital > 100000000) {
+    formErrors.value.initial_capital = '初始资金不能超过 1 亿元'
+    isValid = false
   }
 
-  if (form.value.commission < 0 || form.value.commission > 0.1) {
-    formErrors.value.commission = '手续费率必须在 0 到 10% 之间'
+  if (form.value.commission === null || form.value.commission === undefined || form.value.commission < 0) {
+    formErrors.value.commission = '请输入手续费率'
+    isValid = false
+  } else if (form.value.commission > 0.1) {
+    formErrors.value.commission = '手续费率不能超过 10%'
     isValid = false
   }
 
@@ -116,19 +122,16 @@ const validateForm = () => {
 
 const runBacktest = async () => {
   if (!validateForm()) {
+    notificationStore.warning('请检查表单填写是否正确')
     return
   }
 
-  running.value = true
   try {
-    const response = await backtestApi.create(form.value)
-    const backtestId = response.data.id
-    router.push(`/results?id=${backtestId}`)
+    const result = await backtestStore.runBacktest(backtestApi, form.value)
+    notificationStore.success('回测任务已启动')
+    router.push(`/results?id=${result.id}`)
   } catch (error) {
-    console.error('运行回测失败:', error)
-    alert('运行回测失败: ' + (error.response?.data?.detail || error.message))
-  } finally {
-    running.value = false
+    notificationStore.error('运行回测失败: ' + (error.response?.data?.detail || error.message))
   }
 }
 
@@ -139,6 +142,10 @@ const applyPreset = (days) => {
 
   form.value.end_date = end.toISOString().split('T')[0]
   form.value.start_date = start.toISOString().split('T')[0]
+
+  if (dateRangeError.value) {
+    formErrors.value.end_date = dateRangeError.value
+  }
 }
 
 const setDefaultDates = () => {
@@ -152,10 +159,22 @@ const formatCurrency = (value) => {
   }).format(value)
 }
 
+const formatPercent = (value) => {
+  return (value * 100).toFixed(2) + '%'
+}
+
 onMounted(() => {
-  fetchStrategies()
-  fetchSymbols()
-  setDefaultDates()
+  Promise.all([
+    strategyApi.list().then(r => strategies.value = r.data).catch(() => {
+      notificationStore.error('获取策略列表失败')
+    }),
+    dataApi.getSymbols().then(r => symbols.value = r.data).catch(() => {
+      notificationStore.error('获取标的列表失败')
+    })
+  ]).finally(() => {
+    loading.value = false
+    setDefaultDates()
+  })
 })
 </script>
 
@@ -167,18 +186,16 @@ onMounted(() => {
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-      <!-- 配置表单 -->
       <div class="lg:col-span-2">
         <div class="bg-white rounded-lg shadow p-6">
           <form @submit.prevent="runBacktest" class="space-y-6">
-            <!-- 策略选择 -->
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-2">
                 选择策略 <span class="text-red-500">*</span>
               </label>
               <select
                 v-model="form.strategy_id"
-                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                 :class="{ 'border-red-500': formErrors.strategy_id }"
                 :disabled="loading"
               >
@@ -192,14 +209,13 @@ onMounted(() => {
               </p>
             </div>
 
-            <!-- 标的选择 -->
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-2">
                 选择标的 <span class="text-red-500">*</span>
               </label>
               <select
                 v-model="form.symbol"
-                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                 :class="{ 'border-red-500': formErrors.symbol }"
                 :disabled="loading"
               >
@@ -213,7 +229,6 @@ onMounted(() => {
               </p>
             </div>
 
-            <!-- 日期范围 -->
             <div>
               <div class="flex justify-between items-center mb-2">
                 <label class="block text-sm font-medium text-gray-700">
@@ -225,7 +240,7 @@ onMounted(() => {
                     :key="preset.name"
                     type="button"
                     @click="applyPreset(preset.days)"
-                    class="text-xs px-2 py-1 border rounded hover:bg-gray-50"
+                    class="text-xs px-2 py-1 border rounded hover:bg-gray-50 transition-colors"
                   >
                     {{ preset.name }}
                   </button>
@@ -257,7 +272,6 @@ onMounted(() => {
               </div>
             </div>
 
-            <!-- 初始资金 -->
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-2">
                 初始资金 <span class="text-red-500">*</span>
@@ -269,6 +283,7 @@ onMounted(() => {
                   type="number"
                   step="10000"
                   min="10000"
+                  max="100000000"
                   class="w-full pl-8 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   :class="{ 'border-red-500': formErrors.initial_capital }"
                 />
@@ -281,7 +296,6 @@ onMounted(() => {
               </p>
             </div>
 
-            <!-- 手续费率 -->
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-2">
                 手续费率 <span class="text-red-500">*</span>
@@ -293,10 +307,10 @@ onMounted(() => {
                   step="0.0001"
                   min="0"
                   max="0.1"
-                  class="w-full px-3 py-2 pr-12 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  class="w-full px-3 py-2 pr-16 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   :class="{ 'border-red-500': formErrors.commission }"
                 />
-                <span class="absolute right-3 top-2 text-gray-500">比例</span>
+                <span class="absolute right-3 top-2 text-gray-500 text-sm">比例</span>
               </div>
               <p v-if="formErrors.commission" class="text-sm text-red-600 mt-1">
                 {{ formErrors.commission }}
@@ -305,36 +319,35 @@ onMounted(() => {
                 <button
                   type="button"
                   @click="form.commission = 0.0003"
-                  class="text-xs px-2 py-1 border rounded hover:bg-gray-50"
-                  :class="{ 'bg-blue-50 border-blue-500': form.commission === 0.0003 }"
+                  class="text-xs px-2 py-1 border rounded hover:bg-gray-50 transition-colors"
+                  :class="{ 'bg-blue-50 border-blue-500 text-blue-700': form.commission === 0.0003 }"
                 >
                   万分之三
                 </button>
                 <button
                   type="button"
                   @click="form.commission = 0.0001"
-                  class="text-xs px-2 py-1 border rounded hover:bg-gray-50"
-                  :class="{ 'bg-blue-50 border-blue-500': form.commission === 0.0001 }"
+                  class="text-xs px-2 py-1 border rounded hover:bg-gray-50 transition-colors"
+                  :class="{ 'bg-blue-50 border-blue-500 text-blue-700': form.commission === 0.0001 }"
                 >
                   万分之一
                 </button>
                 <button
                   type="button"
                   @click="form.commission = 0.001"
-                  class="text-xs px-2 py-1 border rounded hover:bg-gray-50"
-                  :class="{ 'bg-blue-50 border-blue-500': form.commission === 0.001 }"
+                  class="text-xs px-2 py-1 border rounded hover:bg-gray-50 transition-colors"
+                  :class="{ 'bg-blue-50 border-blue-500 text-blue-700': form.commission === 0.001 }"
                 >
                   千分之一
                 </button>
               </div>
             </div>
 
-            <!-- 提交按钮 -->
             <div class="flex justify-end pt-4 border-t">
               <button
                 type="submit"
                 :disabled="running"
-                class="bg-blue-600 text-white px-8 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center"
+                class="bg-blue-600 text-white px-8 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center transition-colors"
               >
                 <svg v-if="running" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
                   <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -347,9 +360,7 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- 配置摘要和说明 -->
       <div class="space-y-6">
-        <!-- 配置摘要 -->
         <div class="bg-white rounded-lg shadow p-6">
           <h3 class="font-semibold text-gray-900 mb-4">配置摘要</h3>
           <div class="space-y-3 text-sm">
@@ -373,31 +384,29 @@ onMounted(() => {
             </div>
             <div class="flex justify-between">
               <span class="text-gray-600">手续费率:</span>
-              <span class="font-medium">{{ (form.commission * 10000).toFixed(1) }}‰</span>
+              <span class="font-medium">{{ formatPercent(form.commission) }}</span>
             </div>
           </div>
         </div>
 
-        <!-- 参数说明 -->
         <div class="bg-blue-50 rounded-lg p-6">
           <h3 class="font-medium text-blue-900 mb-3">参数说明</h3>
           <ul class="text-sm text-blue-800 space-y-2">
             <li class="flex">
-              <span class="mr-2">•</span>
+              <span class="mr-2 flex-shrink-0">•</span>
               <span><strong>初始资金</strong>：回测账户的起始资金，建议不少于 10 万元</span>
             </li>
             <li class="flex">
-              <span class="mr-2">•</span>
+              <span class="mr-2 flex-shrink-0">•</span>
               <span><strong>手续费率</strong>：每笔交易的手续费比例，A股默认万分之三</span>
             </li>
             <li class="flex">
-              <span class="mr-2">•</span>
-              <span><strong>日期范围</strong>：回测使用的历史数据时间段</span>
+              <span class="mr-2 flex-shrink-0">•</span>
+              <span><strong>日期范围</strong>：回测使用的历史数据时间段，需至少7天</span>
             </li>
           </ul>
         </div>
 
-        <!-- 策略说明 -->
         <div v-if="selectedStrategy" class="bg-gray-50 rounded-lg p-6">
           <h3 class="font-medium text-gray-900 mb-2">策略说明</h3>
           <p class="text-sm text-gray-600">{{ selectedStrategy.description || '暂无描述' }}</p>

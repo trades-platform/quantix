@@ -1,12 +1,15 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { dataApi } from '../api'
+import { useDataStore } from '../stores/data'
+import { useNotificationStore } from '../stores/notification'
+import { storeToRefs } from 'pinia'
 import KlineChart from '../components/KlineChart.vue'
 
-const symbols = ref([])
-const loading = ref(false)
-const selectedSymbol = ref('')
-const klineData = ref([])
+const dataStore = useDataStore()
+const { symbols, klineData, loading, selectedSymbol, hasData } = storeToRefs(dataStore)
+const notificationStore = useNotificationStore()
+
 const klineLoading = ref(false)
 const klineStats = ref(null)
 
@@ -17,8 +20,6 @@ const importForm = ref({
 
 const showImportDialog = ref(false)
 const importing = ref(false)
-
-// 搜索关键词
 const searchQuery = ref('')
 
 const filteredSymbols = computed(() => {
@@ -29,14 +30,10 @@ const filteredSymbols = computed(() => {
 })
 
 const fetchSymbols = async () => {
-  loading.value = true
   try {
-    const response = await dataApi.getSymbols()
-    symbols.value = response.data
+    await dataStore.fetchSymbols(dataApi)
   } catch (error) {
-    console.error('获取标的列表失败:', error)
-  } finally {
-    loading.value = false
+    notificationStore.error('获取标的列表失败')
   }
 }
 
@@ -45,14 +42,13 @@ const fetchKline = async () => {
 
   klineLoading.value = true
   try {
-    const response = await dataApi.getKline({
+    await dataStore.fetchKline(dataApi, {
       symbol: selectedSymbol.value,
       limit: 500,
     })
-    klineData.value = response.data
     calculateStats()
   } catch (error) {
-    console.error('获取K线数据失败:', error)
+    notificationStore.error('获取K线数据失败')
   } finally {
     klineLoading.value = false
   }
@@ -81,12 +77,25 @@ const calculateStats = () => {
 }
 
 const handleFileChange = (event) => {
-  importForm.value.file = event.target.files[0]
+  const file = event.target.files[0]
+  if (file) {
+    if (!file.name.endsWith('.csv')) {
+      notificationStore.warning('请上传CSV格式文件')
+      event.target.value = ''
+      return
+    }
+    importForm.value.file = file
+  }
 }
 
 const importKline = async () => {
-  if (!importForm.value.symbol || !importForm.value.file) {
-    alert('请填写完整信息')
+  if (!importForm.value.symbol.trim()) {
+    notificationStore.warning('请输入标的代码')
+    return
+  }
+
+  if (!importForm.value.file) {
+    notificationStore.warning('请选择数据文件')
     return
   }
 
@@ -96,15 +105,14 @@ const importKline = async () => {
   formData.append('file', importForm.value.file)
 
   try {
-    const response = await dataApi.importKline(formData)
-    const count = response.data.count || 0
-    alert(`导入成功，共导入 ${count} 条数据`)
+    const response = await dataStore.importKline(dataApi, formData)
+    const count = response.count || 0
+    notificationStore.success(`导入成功，共导入 ${count} 条数据`)
     showImportDialog.value = false
     importForm.value = { symbol: '', file: null }
     await fetchSymbols()
   } catch (error) {
-    console.error('导入失败:', error)
-    alert('导入失败: ' + (error.response?.data?.detail || error.message))
+    notificationStore.error('导入失败: ' + (error.response?.data?.detail || error.message))
   } finally {
     importing.value = false
   }
@@ -115,18 +123,33 @@ const formatDate = (dateStr) => {
 }
 
 const downloadTemplate = () => {
-  const csv = 'timestamp,open,high,low,close,volume\n2024-01-01,10.50,10.80,10.40,10.70,1000000\n2024-01-02,10.70,10.90,10.60,10.85,1200000'
-  const blob = new Blob([csv], { type: 'text/csv' })
+  const csv = `timestamp,open,high,low,close,volume
+2024-01-01,10.50,10.80,10.40,10.70,1000000
+2024-01-02,10.70,10.90,10.60,10.85,1200000
+2024-01-03,10.85,11.00,10.75,10.95,1500000`
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
   a.download = 'kline_template.csv'
   a.click()
   URL.revokeObjectURL(url)
+  notificationStore.success('模板下载成功')
+}
+
+const selectSymbol = (symbol) => {
+  selectedSymbol.value = symbol
+  fetchKline()
 }
 
 onMounted(() => {
   fetchSymbols()
+})
+
+watch(selectedSymbol, () => {
+  if (selectedSymbol.value) {
+    fetchKline()
+  }
 })
 </script>
 
@@ -139,7 +162,7 @@ onMounted(() => {
       </div>
       <button
         @click="showImportDialog = true"
-        class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center"
+        class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center transition-colors"
       >
         <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -149,10 +172,8 @@ onMounted(() => {
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-      <!-- 左侧：标的列表 -->
       <div class="lg:col-span-1">
         <div class="bg-white rounded-lg shadow">
-          <!-- 搜索框 -->
           <div class="p-4 border-b">
             <input
               v-model="searchQuery"
@@ -162,7 +183,6 @@ onMounted(() => {
             />
           </div>
 
-          <!-- 标的列表 -->
           <div class="max-h-96 overflow-y-auto">
             <div v-if="loading" class="p-8 text-center text-gray-500">
               <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
@@ -178,8 +198,8 @@ onMounted(() => {
               <div
                 v-for="symbol in filteredSymbols"
                 :key="symbol"
-                @click="selectedSymbol = symbol; fetchKline()"
-                class="px-4 py-3 hover:bg-gray-50 cursor-pointer border-b last:border-b-0"
+                @click="selectSymbol(symbol)"
+                class="px-4 py-3 hover:bg-gray-50 cursor-pointer border-b last:border-b-0 transition-colors"
                 :class="{ 'bg-blue-50 border-l-4 border-l-blue-500': selectedSymbol === symbol }"
               >
                 <div class="font-medium text-gray-900">{{ symbol }}</div>
@@ -188,7 +208,6 @@ onMounted(() => {
             </div>
           </div>
 
-          <!-- 统计信息 -->
           <div class="p-4 border-t bg-gray-50">
             <div class="flex justify-between text-sm">
               <span class="text-gray-600">总计:</span>
@@ -198,7 +217,6 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- 右侧：K线预览 -->
       <div class="lg:col-span-2">
         <div v-if="!selectedSymbol" class="bg-white rounded-lg shadow p-12 text-center">
           <svg class="mx-auto h-16 w-16 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -209,7 +227,6 @@ onMounted(() => {
         </div>
 
         <div v-else>
-          <!-- 统计信息 -->
           <div v-if="klineStats" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <div class="bg-white rounded-lg shadow p-4">
               <p class="text-xs text-gray-600">数据点数</p>
@@ -231,19 +248,21 @@ onMounted(() => {
             </div>
           </div>
 
-          <!-- K线图表 -->
           <div class="bg-white rounded-lg shadow p-6">
             <div class="flex justify-between items-center mb-4">
               <h3 class="text-lg font-semibold">K线图表 - {{ selectedSymbol }}</h3>
               <span v-if="klineStats" class="text-sm text-gray-600">{{ klineStats.dateRange }}</span>
             </div>
-            <KlineChart v-if="klineData.length > 0" :data="klineData" height="400px" />
+            <KlineChart v-if="hasData && !klineLoading" :data="klineData" height="400px" />
+            <div v-else-if="klineLoading" class="h-64 flex items-center justify-center text-gray-500">
+              <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+              <span class="ml-2">加载中...</span>
+            </div>
             <div v-else class="h-64 flex items-center justify-center text-gray-500">
               暂无K线数据
             </div>
           </div>
 
-          <!-- 数据表格 -->
           <div class="mt-6 bg-white rounded-lg shadow overflow-hidden">
             <div class="px-6 py-4 border-b flex justify-between items-center">
               <h3 class="text-lg font-semibold">数据明细</h3>
@@ -253,20 +272,20 @@ onMounted(() => {
               <table class="min-w-full">
                 <thead class="bg-gray-50">
                   <tr>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">日期</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">开盘</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">最高</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">最低</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">收盘</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">成交量</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">涨跌</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">日期</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">开盘</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">最高</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">最低</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">收盘</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">成交量</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">涨跌</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-gray-200">
+                <tbody class="divide-y divide-gray-200 bg-white">
                   <tr v-if="klineData.length === 0 && !klineLoading">
                     <td colspan="7" class="px-6 py-8 text-center text-gray-500">暂无数据</td>
                   </tr>
-                  <tr v-else v-for="(bar, index) in klineData.slice(0, 20)" :key="index" class="hover:bg-gray-50">
+                  <tr v-else v-for="(bar, index) in klineData.slice(0, 20)" :key="index" class="hover:bg-gray-50 transition-colors">
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {{ formatDate(bar.timestamp) }}
                     </td>
@@ -294,83 +313,87 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- 导入对话框 -->
-    <div
-      v-if="showImportDialog"
-      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-    >
-      <div class="bg-white rounded-lg shadow-xl w-full max-w-md">
-        <div class="px-6 py-4 border-b flex justify-between items-center">
-          <h2 class="text-xl font-semibold">导入K线数据</h2>
-          <button @click="showImportDialog = false" class="text-gray-400 hover:text-gray-600">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <div class="p-6 space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">标的代码 <span class="text-red-500">*</span></label>
-            <input
-              v-model="importForm.symbol"
-              type="text"
-              class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              placeholder="例如: 600000.SH"
-            />
+    <Teleport to="body">
+      <div
+        v-if="showImportDialog"
+        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+        @click.self="showImportDialog = false"
+      >
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-md">
+          <div class="px-6 py-4 border-b flex justify-between items-center">
+            <h2 class="text-xl font-semibold">导入K线数据</h2>
+            <button
+              @click="showImportDialog = false"
+              class="text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
 
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">数据文件 (CSV) <span class="text-red-500">*</span></label>
-            <input
-              type="file"
-              accept=".csv"
-              @change="handleFileChange"
-              class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-            <p class="text-xs text-gray-500 mt-1">
-              需包含列: timestamp, open, high, low, close, volume
-            </p>
-          </div>
+          <div class="p-6 space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">标的代码 <span class="text-red-500">*</span></label>
+              <input
+                v-model="importForm.symbol"
+                type="text"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="例如: 600000.SH"
+              />
+            </div>
 
-          <!-- 模板下载 -->
-          <div class="bg-blue-50 rounded-lg p-3">
-            <div class="flex items-center justify-between">
-              <div>
-                <p class="text-sm font-medium text-blue-900">需要CSV模板?</p>
-                <p class="text-xs text-blue-700">下载示例文件了解格式要求</p>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">数据文件 (CSV) <span class="text-red-500">*</span></label>
+              <input
+                type="file"
+                accept=".csv"
+                @change="handleFileChange"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <p class="text-xs text-gray-500 mt-1">
+                需包含列: timestamp, open, high, low, close, volume
+              </p>
+            </div>
+
+            <div class="bg-blue-50 rounded-lg p-3">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-sm font-medium text-blue-900">需要CSV模板?</p>
+                  <p class="text-xs text-blue-700">下载示例文件了解格式要求</p>
+                </div>
+                <button
+                  @click="downloadTemplate"
+                  class="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                >
+                  下载模板
+                </button>
               </div>
-              <button
-                @click="downloadTemplate"
-                class="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-              >
-                下载模板
-              </button>
             </div>
           </div>
-        </div>
 
-        <div class="px-6 py-4 bg-gray-50 flex justify-end space-x-3">
-          <button
-            @click="showImportDialog = false"
-            :disabled="importing"
-            class="px-4 py-2 border rounded-lg hover:bg-gray-100 disabled:opacity-50"
-          >
-            取消
-          </button>
-          <button
-            @click="importKline"
-            :disabled="importing"
-            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center"
-          >
-            <svg v-if="importing" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            {{ importing ? '导入中...' : '导入' }}
-          </button>
+          <div class="px-6 py-4 bg-gray-50 flex justify-end space-x-3">
+            <button
+              @click="showImportDialog = false"
+              :disabled="importing"
+              class="px-4 py-2 border rounded-lg hover:bg-gray-100 disabled:opacity-50 transition-colors"
+            >
+              取消
+            </button>
+            <button
+              @click="importKline"
+              :disabled="importing"
+              class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center transition-colors"
+            >
+              <svg v-if="importing" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              {{ importing ? '导入中...' : '导入' }}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>

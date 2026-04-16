@@ -1,14 +1,18 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { strategyApi } from '../api'
+import { useStrategiesStore } from '../stores/strategies'
+import { useNotificationStore } from '../stores/notification'
+import { storeToRefs } from 'pinia'
 import CodeEditor from '../components/CodeEditor.vue'
 
-const strategies = ref([])
-const loading = ref(false)
+const strategiesStore = useStrategiesStore()
+const { strategies, loading, saving } = storeToRefs(strategiesStore)
+const notificationStore = useNotificationStore()
+
 const showEditor = ref(false)
 const editingId = ref(null)
 const deletingId = ref(null)
-const saving = ref(false)
 
 const form = ref({
   name: '',
@@ -56,7 +60,6 @@ def handle_bar(context, bar):
 `,
 })
 
-// 默认策略模板
 const templates = {
   dual_ma: {
     name: '双均线策略',
@@ -165,35 +168,40 @@ def handle_bar(context, bar):
   },
 }
 
-const fetchStrategies = async () => {
-  loading.value = true
-  try {
-    const response = await strategyApi.list()
-    strategies.value = response.data
-  } catch (error) {
-    console.error('获取策略列表失败:', error)
-  } finally {
-    loading.value = false
+const formErrors = ref({
+  name: '',
+  code: '',
+})
+
+const validateForm = () => {
+  let isValid = true
+  formErrors.value = { name: '', code: '' }
+
+  if (!form.value.name.trim()) {
+    formErrors.value.name = '请输入策略名称'
+    isValid = false
   }
+
+  if (!form.value.code.trim()) {
+    formErrors.value.code = '请输入策略代码'
+    isValid = false
+  }
+
+  return isValid
 }
 
 const createStrategy = async () => {
-  if (!form.value.name.trim()) {
-    alert('请输入策略名称')
+  if (!validateForm()) {
     return
   }
 
-  saving.value = true
   try {
-    await strategyApi.create(form.value)
+    await strategiesStore.createStrategy(strategyApi, form.value)
+    notificationStore.success('策略创建成功')
     showEditor.value = false
     resetForm()
-    await fetchStrategies()
   } catch (error) {
-    console.error('创建策略失败:', error)
-    alert('创建策略失败: ' + (error.response?.data?.detail || error.message))
-  } finally {
-    saving.value = false
+    notificationStore.error('创建策略失败: ' + (error.response?.data?.detail || error.message))
   }
 }
 
@@ -209,28 +217,22 @@ const editStrategy = async (id) => {
     }
     showEditor.value = true
   } catch (error) {
-    console.error('获取策略详情失败:', error)
-    alert('获取策略详情失败')
+    notificationStore.error('获取策略详情失败')
   }
 }
 
 const updateStrategy = async () => {
-  if (!form.value.name.trim()) {
-    alert('请输入策略名称')
+  if (!validateForm()) {
     return
   }
 
-  saving.value = true
   try {
-    await strategyApi.update(editingId.value, form.value)
+    await strategiesStore.updateStrategy(strategyApi, editingId.value, form.value)
+    notificationStore.success('策略更新成功')
     showEditor.value = false
     resetForm()
-    await fetchStrategies()
   } catch (error) {
-    console.error('更新策略失败:', error)
-    alert('更新策略失败: ' + (error.response?.data?.detail || error.message))
-  } finally {
-    saving.value = false
+    notificationStore.error('更新策略失败: ' + (error.response?.data?.detail || error.message))
   }
 }
 
@@ -240,12 +242,11 @@ const confirmDelete = (id) => {
 
 const deleteStrategy = async () => {
   try {
-    await strategyApi.delete(deletingId.value)
+    await strategiesStore.deleteStrategy(strategyApi, deletingId.value)
+    notificationStore.success('策略删除成功')
     deletingId.value = null
-    await fetchStrategies()
   } catch (error) {
-    console.error('删除策略失败:', error)
-    alert('删除策略失败')
+    notificationStore.error('删除策略失败')
   }
 }
 
@@ -256,6 +257,7 @@ const resetForm = () => {
     code: templates.dual_ma.code,
   }
   editingId.value = null
+  formErrors.value = { name: '', code: '' }
 }
 
 const openCreate = () => {
@@ -268,6 +270,7 @@ const useTemplate = (templateKey) => {
   form.value.name = template.name
   form.value.description = template.description
   form.value.code = template.code
+  formErrors.value = { name: '', code: '' }
 }
 
 const formatDate = (dateStr) => {
@@ -275,7 +278,9 @@ const formatDate = (dateStr) => {
 }
 
 onMounted(() => {
-  fetchStrategies()
+  strategiesStore.fetchStrategies(strategyApi).catch(() => {
+    notificationStore.error('获取策略列表失败')
+  })
 })
 </script>
 
@@ -288,7 +293,7 @@ onMounted(() => {
       </div>
       <button
         @click="openCreate"
-        class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center"
+        class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center transition-colors"
       >
         <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
@@ -297,7 +302,6 @@ onMounted(() => {
       </button>
     </div>
 
-    <!-- 策略列表 -->
     <div class="mt-8 bg-white rounded-lg shadow overflow-hidden">
       <div class="px-6 py-4 border-b flex justify-between items-center">
         <h2 class="text-lg font-semibold">策略列表</h2>
@@ -306,17 +310,19 @@ onMounted(() => {
       <table class="min-w-full">
         <thead class="bg-gray-50">
           <tr>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">名称</th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">描述</th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">创建时间</th>
-            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">操作</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">名称</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">描述</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">创建时间</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-200">
+        <tbody class="divide-y divide-gray-200 bg-white">
           <tr v-if="loading">
             <td colspan="4" class="px-6 py-12 text-center text-gray-500">
-              <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-              <p class="mt-2">加载中...</p>
+              <div class="flex flex-col items-center">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <p class="mt-2">加载中...</p>
+              </div>
             </td>
           </tr>
           <tr v-else-if="strategies.length === 0">
@@ -328,26 +334,28 @@ onMounted(() => {
               <p class="text-sm">点击上方按钮创建第一个策略</p>
             </td>
           </tr>
-          <tr v-else v-for="strategy in strategies" :key="strategy.id" class="hover:bg-gray-50">
-            <td class="px-6 py-4">
+          <tr v-else v-for="strategy in strategies" :key="strategy.id" class="hover:bg-gray-50 transition-colors">
+            <td class="px-6 py-4 whitespace-nowrap">
               <div class="font-medium text-gray-900">{{ strategy.name }}</div>
             </td>
             <td class="px-6 py-4">
-              <div class="text-sm text-gray-600 max-w-xs truncate">{{ strategy.description || '-' }}</div>
+              <div class="text-sm text-gray-600 max-w-xs truncate" :title="strategy.description">
+                {{ strategy.description || '-' }}
+              </div>
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
               {{ formatDate(strategy.created_at) }}
             </td>
-            <td class="px-6 py-4 whitespace-nowrap text-right">
+            <td class="px-6 py-4 whitespace-nowrap text-right text-sm">
               <button
                 @click="editStrategy(strategy.id)"
-                class="text-blue-600 hover:text-blue-800 mr-4"
+                class="text-blue-600 hover:text-blue-800 mr-4 transition-colors"
               >
                 编辑
               </button>
               <button
                 @click="confirmDelete(strategy.id)"
-                class="text-red-600 hover:text-red-800"
+                class="text-red-600 hover:text-red-800 transition-colors"
               >
                 删除
               </button>
@@ -357,134 +365,143 @@ onMounted(() => {
       </table>
     </div>
 
-    <!-- 策略编辑器对话框 -->
-    <div
-      v-if="showEditor"
-      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-    >
-      <div class="bg-white rounded-lg shadow-xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
-        <div class="px-6 py-4 border-b flex justify-between items-center">
-          <h2 class="text-xl font-semibold">
-            {{ editingId ? '编辑策略' : '创建策略' }}
-          </h2>
-          <button @click="showEditor = false" class="text-gray-400 hover:text-gray-600">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <div class="flex-1 overflow-auto p-6">
-          <!-- 模板选择 -->
-          <div v-if="!editingId" class="mb-4">
-            <label class="block text-sm font-medium text-gray-700 mb-2">使用模板</label>
-            <div class="flex space-x-2">
-              <button
-                v-for="(template, key) in templates"
-                :key="key"
-                @click="useTemplate(key)"
-                class="px-3 py-2 text-sm border rounded-lg hover:bg-gray-50"
-              >
-                {{ template.name }}
-              </button>
-            </div>
+    <Teleport to="body">
+      <div
+        v-if="showEditor"
+        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+        @click.self="showEditor = false"
+      >
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+          <div class="px-6 py-4 border-b flex justify-between items-center">
+            <h2 class="text-xl font-semibold">
+              {{ editingId ? '编辑策略' : '创建策略' }}
+            </h2>
+            <button
+              @click="showEditor = false"
+              class="text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
 
-          <div class="space-y-4">
-            <!-- 策略名称 -->
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">
-                策略名称 <span class="text-red-500">*</span>
-              </label>
-              <input
-                v-model="form.name"
-                type="text"
-                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="例如：双均线策略"
-              />
-            </div>
-
-            <!-- 描述 -->
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">描述</label>
-              <textarea
-                v-model="form.description"
-                rows="2"
-                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="简要描述策略逻辑和特点"
-              ></textarea>
-            </div>
-
-            <!-- 代码编辑器 -->
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">
-                策略代码 <span class="text-red-500">*</span>
-              </label>
-              <div class="border rounded-lg overflow-hidden" style="height: 400px">
-                <CodeEditor v-model="form.code" language="python" />
+          <div class="flex-1 overflow-auto p-6">
+            <div v-if="!editingId" class="mb-4">
+              <label class="block text-sm font-medium text-gray-700 mb-2">使用模板</label>
+              <div class="flex flex-wrap gap-2">
+                <button
+                  v-for="(template, key) in templates"
+                  :key="key"
+                  @click="useTemplate(key)"
+                  class="px-3 py-2 text-sm border rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  {{ template.name }}
+                </button>
               </div>
             </div>
 
-            <!-- API 说明 -->
-            <div class="bg-blue-50 rounded-lg p-4">
-              <h3 class="font-medium text-blue-900 mb-2">策略 API 说明</h3>
-              <div class="text-sm text-blue-800 space-y-1">
-                <p><code class="bg-blue-100 px-1 rounded">initialize(context)</code> - 策略初始化，设置参数</p>
-                <p><code class="bg-blue-100 px-1 rounded">handle_bar(context, bar)</code> - 处理单根K线，返回订单列表</p>
-                <p class="mt-2"><strong>context 对象属性：</strong></p>
-                <ul class="list-disc list-inside ml-2">
-                  <li><code>context.history(length)</code> - 获取历史数据</li>
-                  <li><code>context.position</code> - 当前持仓</li>
-                  <li><code>context.symbol</code> - 当前标的</li>
-                </ul>
+            <div class="space-y-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">
+                  策略名称 <span class="text-red-500">*</span>
+                </label>
+                <input
+                  v-model="form.name"
+                  type="text"
+                  class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  :class="{ 'border-red-500': formErrors.name }"
+                  placeholder="例如：双均线策略"
+                />
+                <p v-if="formErrors.name" class="text-sm text-red-600 mt-1">
+                  {{ formErrors.name }}
+                </p>
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">描述</label>
+                <textarea
+                  v-model="form.description"
+                  rows="2"
+                  class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="简要描述策略逻辑和特点"
+                ></textarea>
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">
+                  策略代码 <span class="text-red-500">*</span>
+                </label>
+                <div class="border rounded-lg overflow-hidden" :class="{ 'border-red-500': formErrors.code }" style="height: 400px">
+                  <CodeEditor v-model="form.code" language="python" />
+                </div>
+                <p v-if="formErrors.code" class="text-sm text-red-600 mt-1">
+                  {{ formErrors.code }}
+                </p>
+              </div>
+
+              <div class="bg-blue-50 rounded-lg p-4">
+                <h3 class="font-medium text-blue-900 mb-2">策略 API 说明</h3>
+                <div class="text-sm text-blue-800 space-y-1">
+                  <p><code class="bg-blue-100 px-1 rounded">initialize(context)</code> - 策略初始化，设置参数</p>
+                  <p><code class="bg-blue-100 px-1 rounded">handle_bar(context, bar)</code> - 处理单根K线，返回订单列表</p>
+                  <p class="mt-2"><strong>context 对象属性：</strong></p>
+                  <ul class="list-disc list-inside ml-2 space-y-1">
+                    <li><code>context.history(length)</code> - 获取历史数据</li>
+                    <li><code>context.position</code> - 当前持仓</li>
+                    <li><code>context.symbol</code> - 当前标的</li>
+                  </ul>
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <div class="px-6 py-4 bg-gray-50 flex justify-end space-x-3">
-          <button
-            @click="showEditor = false"
-            class="px-4 py-2 border rounded-lg hover:bg-gray-100"
-          >
-            取消
-          </button>
-          <button
-            @click="editingId ? updateStrategy() : createStrategy()"
-            :disabled="saving"
-            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-          >
-            {{ saving ? '保存中...' : (editingId ? '更新' : '创建') }}
-          </button>
+          <div class="px-6 py-4 bg-gray-50 flex justify-end space-x-3">
+            <button
+              @click="showEditor = false"
+              class="px-4 py-2 border rounded-lg hover:bg-gray-100 transition-colors"
+            >
+              取消
+            </button>
+            <button
+              @click="editingId ? updateStrategy() : createStrategy()"
+              :disabled="saving"
+              class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            >
+              {{ saving ? '保存中...' : (editingId ? '更新' : '创建') }}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
 
-    <!-- 删除确认对话框 -->
-    <div
-      v-if="deletingId"
-      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-    >
-      <div class="bg-white rounded-lg shadow-xl w-full max-w-md">
-        <div class="p-6">
-          <h3 class="text-lg font-semibold text-gray-900 mb-2">确认删除</h3>
-          <p class="text-gray-600">确定要删除这个策略吗？此操作无法撤销。</p>
-        </div>
-        <div class="px-6 py-4 bg-gray-50 flex justify-end space-x-3">
-          <button
-            @click="deletingId = null"
-            class="px-4 py-2 border rounded-lg hover:bg-gray-100"
-          >
-            取消
-          </button>
-          <button
-            @click="deleteStrategy"
-            class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
-          >
-            删除
-          </button>
+    <Teleport to="body">
+      <div
+        v-if="deletingId"
+        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+        @click.self="deletingId = null"
+      >
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-md">
+          <div class="p-6">
+            <h3 class="text-lg font-semibold text-gray-900 mb-2">确认删除</h3>
+            <p class="text-gray-600">确定要删除这个策略吗？此操作无法撤销。</p>
+          </div>
+          <div class="px-6 py-4 bg-gray-50 flex justify-end space-x-3">
+            <button
+              @click="deletingId = null"
+              class="px-4 py-2 border rounded-lg hover:bg-gray-100 transition-colors"
+            >
+              取消
+            </button>
+            <button
+              @click="deleteStrategy"
+              class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+            >
+              删除
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>

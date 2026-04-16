@@ -1,7 +1,10 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { backtestApi } from '../api'
+import { useBacktestStore } from '../stores/backtest'
+import { useNotificationStore } from '../stores/notification'
+import { storeToRefs } from 'pinia'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart, PieChart, BarChart } from 'echarts/charts'
@@ -26,112 +29,118 @@ use([
 
 const route = useRoute()
 const router = useRouter()
+const backtestStore = useBacktestStore()
+const notificationStore = useNotificationStore()
+const { loading, currentBacktest, trades } = storeToRefs(backtestStore)
 
 const backtestId = computed(() => route.query.id)
-const loading = ref(false)
-const backtest = ref(null)
-const trades = ref([])
 
-// 净值曲线图配置
 const equityChartOption = computed(() => {
-  if (!backtest.value?.equity_curve) {
+  if (!currentBacktest.value?.equity_curve) {
     return {}
   }
 
-  const data = JSON.parse(backtest.value.equity_curve)
-  const dates = data.map((d) => d.date)
-  const values = data.map((d) => d.value)
-  const returns = data.map((d) => d.daily_return || 0)
+  try {
+    const data = JSON.parse(currentBacktest.value.equity_curve)
+    const dates = data.map((d) => d.date)
+    const values = data.map((d) => d.value)
+    const returns = data.map((d) => d.daily_return || 0)
 
-  return {
-    title: {
-      text: '净值曲线',
-      left: 'center',
-    },
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: {
-        type: 'cross',
+    return {
+      title: {
+        text: '净值曲线',
+        left: 'center',
       },
-      formatter: (params) => {
-        const data = params[0]
-        return `
-          <div>日期: ${data.axisValue}</div>
-          <div>净值: ${data.value?.toFixed(2) || '-'}</div>
-        `
-      },
-    },
-    legend: {
-      data: ['净值', '日收益'],
-      top: 30,
-    },
-    grid: {
-      left: '3%',
-      right: '4%',
-      bottom: '3%',
-      containLabel: true,
-    },
-    xAxis: {
-      type: 'category',
-      data: dates,
-      boundaryGap: false,
-    },
-    yAxis: [
-      {
-        type: 'value',
-        name: '净值',
-        position: 'left',
-      },
-      {
-        type: 'value',
-        name: '日收益率',
-        position: 'right',
-        axisLabel: {
-          formatter: (value) => (value * 100).toFixed(1) + '%',
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: {
+          type: 'cross',
+        },
+        formatter: (params) => {
+          const data = params[0]
+          if (!data) return ''
+          return `
+            <div>日期: ${data.axisValue}</div>
+            <div>净值: ${data.value?.toFixed(2) || '-'}</div>
+          `
         },
       },
-    ],
-    series: [
-      {
-        name: '净值',
-        type: 'line',
-        data: values,
-        smooth: true,
-        areaStyle: {
-          color: {
-            type: 'linear',
-            x: 0,
-            y: 0,
-            x2: 0,
-            y2: 1,
-            colorStops: [
-              { offset: 0, color: 'rgba(59, 130, 246, 0.3)' },
-              { offset: 1, color: 'rgba(59, 130, 246, 0)' },
-            ],
+      legend: {
+        data: ['净值', '日收益'],
+        top: 30,
+      },
+      grid: {
+        left: '3%',
+        right: '4%',
+        bottom: '3%',
+        containLabel: true,
+      },
+      xAxis: {
+        type: 'category',
+        data: dates,
+        boundaryGap: false,
+      },
+      yAxis: [
+        {
+          type: 'value',
+          name: '净值',
+          position: 'left',
+        },
+        {
+          type: 'value',
+          name: '日收益率',
+          position: 'right',
+          axisLabel: {
+            formatter: (value) => (value * 100).toFixed(1) + '%',
           },
         },
-      },
-      {
-        name: '日收益',
-        type: 'bar',
-        yAxisIndex: 1,
-        data: returns,
-        itemStyle: {
-          color: (params) => {
-            return params.value >= 0 ? '#ef4444' : '#22c55e'
+      ],
+      series: [
+        {
+          name: '净值',
+          type: 'line',
+          data: values,
+          smooth: true,
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: 'rgba(59, 130, 246, 0.3)' },
+                { offset: 1, color: 'rgba(59, 130, 246, 0)' },
+              ],
+            },
           },
         },
-      },
-    ],
+        {
+          name: '日收益',
+          type: 'bar',
+          yAxisIndex: 1,
+          data: returns,
+          itemStyle: {
+            color: (params) => {
+              return params.value >= 0 ? '#ef4444' : '#22c55e'
+            },
+          },
+        },
+      ],
+    }
+  } catch (e) {
+    console.error('Failed to parse equity curve:', e)
+    return {}
   }
 })
 
-// 收益分布图配置
 const returnDistributionOption = computed(() => {
-  if (trades.value.length === 0) return {}
+  if (trades.value.length === 0) {
+    return {}
+  }
 
-  const profitable = trades.value.filter((t) => t.profit > 0).length
-  const loss = trades.value.filter((t) => t.profit < 0).length
+  const profitable = trades.value.filter((t) => t.profit && t.profit > 0).length
+  const loss = trades.value.filter((t) => t.profit && t.profit < 0).length
 
   return {
     title: {
@@ -166,74 +175,71 @@ const returnDistributionOption = computed(() => {
   }
 })
 
-// 月度收益图配置
 const monthlyReturnOption = computed(() => {
-  if (!backtest.value?.monthly_returns) return {}
+  if (!currentBacktest.value?.monthly_returns) {
+    return {}
+  }
 
-  const data = JSON.parse(backtest.value.monthly_returns)
-  return {
-    title: {
-      text: '月度收益',
-      left: 'center',
-    },
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: {
-        type: 'shadow',
+  try {
+    const data = JSON.parse(currentBacktest.value.monthly_returns)
+    return {
+      title: {
+        text: '月度收益',
+        left: 'center',
       },
-      formatter: (params) => {
-        const data = params[0]
-        return `
-          <div>月份: ${data.axisValue}</div>
-          <div>收益率: ${(data.value * 100).toFixed(2)}%</div>
-        `
-      },
-    },
-    xAxis: {
-      type: 'category',
-      data: data.map((d) => d.month),
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: {
-        formatter: (value) => (value * 100).toFixed(0) + '%',
-      },
-    },
-    series: [
-      {
-        type: 'bar',
-        data: data.map((d) => d.return),
-        itemStyle: {
-          color: (params) => {
-            return params.value >= 0 ? '#ef4444' : '#22c55e'
-          },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: {
+          type: 'shadow',
+        },
+        formatter: (params) => {
+          const data = params[0]
+          if (!data) return ''
+          return `
+            <div>月份: ${data.axisValue}</div>
+            <div>收益率: ${(data.value * 100).toFixed(2)}%</div>
+          `
         },
       },
-    ],
+      xAxis: {
+        type: 'category',
+        data: data.map((d) => d.month),
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: {
+          formatter: (value) => (value * 100).toFixed(0) + '%',
+        },
+      },
+      series: [
+        {
+          type: 'bar',
+          data: data.map((d) => d.return),
+          itemStyle: {
+            color: (params) => {
+              return params.value >= 0 ? '#ef4444' : '#22c55e'
+            },
+          },
+        },
+      ],
+    }
+  } catch (e) {
+    console.error('Failed to parse monthly returns:', e)
+    return {}
   }
 })
 
 const fetchBacktest = async () => {
-  if (!backtestId.value) return
-
-  loading.value = true
-  try {
-    const response = await backtestApi.get(backtestId.value)
-    backtest.value = response.data
-    await fetchTrades()
-  } catch (error) {
-    console.error('获取回测结果失败:', error)
-  } finally {
-    loading.value = false
+  if (!backtestId.value) {
+    notificationStore.warning('未指定回测ID')
+    return
   }
-}
 
-const fetchTrades = async () => {
   try {
-    const response = await backtestApi.getTrades(backtestId.value)
-    trades.value = response.data
+    await backtestStore.fetchBacktest(backtestApi, backtestId.value)
+    await backtestStore.fetchTrades(backtestApi, backtestId.value)
   } catch (error) {
-    console.error('获取交易明细失败:', error)
+    notificationStore.error('获取回测结果失败')
   }
 }
 
@@ -254,8 +260,16 @@ const runNewBacktest = () => {
   router.push('/backtest')
 }
 
+watch(backtestId, (newId) => {
+  if (newId) {
+    fetchBacktest()
+  }
+}, { immediate: true })
+
 onMounted(() => {
-  fetchBacktest()
+  if (!backtestId.value) {
+    notificationStore.warning('未指定回测ID，请从回测配置页面进入')
+  }
 })
 </script>
 
@@ -268,7 +282,7 @@ onMounted(() => {
       </div>
       <button
         @click="runNewBacktest"
-        class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+        class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
       >
         新建回测
       </button>
@@ -279,67 +293,64 @@ onMounted(() => {
       <p class="mt-2 text-gray-600">加载中...</p>
     </div>
 
-    <div v-else-if="backtest">
-      <!-- 回测信息 -->
+    <div v-else-if="currentBacktest">
       <div class="mt-6 bg-gray-50 rounded-lg p-4 flex justify-between items-center">
         <div>
           <span class="text-sm text-gray-600">标的: </span>
-          <span class="font-medium">{{ backtest.symbol }}</span>
+          <span class="font-medium">{{ currentBacktest.symbol }}</span>
           <span class="mx-3 text-gray-300">|</span>
           <span class="text-sm text-gray-600">期间: </span>
-          <span class="font-medium">{{ backtest.start_date }} 至 {{ backtest.end_date }}</span>
+          <span class="font-medium">{{ currentBacktest.start_date }} 至 {{ currentBacktest.end_date }}</span>
           <span class="mx-3 text-gray-300">|</span>
           <span class="text-sm text-gray-600">初始资金: </span>
-          <span class="font-medium">{{ formatCurrency(backtest.initial_capital) }}</span>
+          <span class="font-medium">{{ formatCurrency(currentBacktest.initial_capital) }}</span>
         </div>
         <div
           class="px-3 py-1 rounded-full text-sm font-medium"
-          :class="backtest.status === 'completed' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'"
+          :class="currentBacktest.status === 'completed' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'"
         >
-          {{ backtest.status === 'completed' ? '已完成' : '运行中' }}
+          {{ currentBacktest.status === 'completed' ? '已完成' : '运行中' }}
         </div>
       </div>
 
-      <!-- 核心指标 -->
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mt-8">
-        <div class="bg-white rounded-lg shadow p-6 border-l-4" :class="backtest.total_return >= 0 ? 'border-red-500' : 'border-green-500'">
+        <div class="bg-white rounded-lg shadow p-6 border-l-4" :class="currentBacktest.total_return >= 0 ? 'border-red-500' : 'border-green-500'">
           <p class="text-sm text-gray-600">总收益率</p>
           <p
             class="text-3xl font-bold mt-2"
-            :class="backtest.total_return >= 0 ? 'text-red-600' : 'text-green-600'"
+            :class="currentBacktest.total_return >= 0 ? 'text-red-600' : 'text-green-600'"
           >
-            {{ formatPercent(backtest.total_return) }}
+            {{ formatPercent(currentBacktest.total_return) }}
           </p>
         </div>
         <div class="bg-white rounded-lg shadow p-6 border-l-4 border-blue-500">
           <p class="text-sm text-gray-600">年化收益</p>
           <p
             class="text-3xl font-bold mt-2"
-            :class="backtest.annual_return >= 0 ? 'text-red-600' : 'text-green-600'"
+            :class="currentBacktest.annual_return >= 0 ? 'text-red-600' : 'text-green-600'"
           >
-            {{ formatPercent(backtest.annual_return) }}
+            {{ formatPercent(currentBacktest.annual_return) }}
           </p>
         </div>
         <div class="bg-white rounded-lg shadow p-6 border-l-4 border-purple-500">
           <p class="text-sm text-gray-600">夏普比率</p>
           <p class="text-3xl font-bold mt-2 text-purple-600">
-            {{ backtest.sharpe_ratio?.toFixed(2) || '-' }}
+            {{ currentBacktest.sharpe_ratio?.toFixed(2) || '-' }}
           </p>
         </div>
         <div class="bg-white rounded-lg shadow p-6 border-l-4 border-green-500">
           <p class="text-sm text-gray-600">最大回撤</p>
           <p class="text-3xl font-bold mt-2 text-green-600">
-            {{ formatPercent(backtest.max_drawdown) }}
+            {{ formatPercent(currentBacktest.max_drawdown) }}
           </p>
         </div>
       </div>
 
-      <!-- 更多指标 -->
       <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mt-6">
         <div class="bg-white rounded-lg shadow p-6">
           <p class="text-sm text-gray-600">胜率</p>
           <p class="text-xl font-bold mt-2 text-blue-600">
-            {{ formatPercent(backtest.win_rate) }}
+            {{ formatPercent(currentBacktest.win_rate) }}
           </p>
         </div>
         <div class="bg-white rounded-lg shadow p-6">
@@ -351,36 +362,31 @@ onMounted(() => {
         <div class="bg-white rounded-lg shadow p-6">
           <p class="text-sm text-gray-600">最终资产</p>
           <p class="text-xl font-bold mt-2 text-gray-900">
-            {{ formatCurrency(backtest.initial_capital * (1 + (backtest.total_return || 0))) }}
+            {{ formatCurrency(currentBacktest.initial_capital * (1 + (currentBacktest.total_return || 0))) }}
           </p>
         </div>
         <div class="bg-white rounded-lg shadow p-6">
           <p class="text-sm text-gray-600">回测时间</p>
           <p class="text-sm font-medium mt-2 text-gray-700">
-            {{ new Date(backtest.created_at).toLocaleString('zh-CN') }}
+            {{ new Date(currentBacktest.created_at).toLocaleString('zh-CN') }}
           </p>
         </div>
       </div>
 
-      <!-- 图表区域 -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
-        <!-- 净值曲线 -->
         <div class="bg-white rounded-lg shadow p-6">
           <v-chart class="h-96" :option="equityChartOption" autoresize />
         </div>
 
-        <!-- 盈亏分布 -->
         <div class="bg-white rounded-lg shadow p-6">
           <v-chart class="h-96" :option="returnDistributionOption" autoresize />
         </div>
       </div>
 
-      <!-- 月度收益 -->
-      <div v-if="backtest.monthly_returns" class="mt-8 bg-white rounded-lg shadow p-6">
+      <div v-if="currentBacktest.monthly_returns" class="mt-8 bg-white rounded-lg shadow p-6">
         <v-chart class="h-80" :option="monthlyReturnOption" autoresize />
       </div>
 
-      <!-- 交易明细 -->
       <div class="mt-8 bg-white rounded-lg shadow overflow-hidden">
         <div class="px-6 py-4 border-b flex justify-between items-center">
           <h2 class="text-lg font-semibold">交易明细</h2>
@@ -390,20 +396,20 @@ onMounted(() => {
           <table class="min-w-full">
             <thead class="bg-gray-50">
               <tr>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">序号</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">时间</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">标的</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">方向</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">价格</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">数量</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">盈亏</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">序号</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">时间</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">标的</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">方向</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">价格</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">数量</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">盈亏</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-gray-200">
+            <tbody class="divide-y divide-gray-200 bg-white">
               <tr v-if="trades.length === 0">
                 <td colspan="7" class="px-6 py-8 text-center text-gray-500">暂无交易记录</td>
               </tr>
-              <tr v-else v-for="(trade, index) in trades" :key="trade.id" class="hover:bg-gray-50">
+              <tr v-else v-for="(trade, index) in trades" :key="trade.id" class="hover:bg-gray-50 transition-colors">
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                   {{ index + 1 }}
                 </td>
@@ -445,7 +451,7 @@ onMounted(() => {
       <p class="mt-2 text-gray-600">请先从回测配置页面运行回测</p>
       <button
         @click="runNewBacktest"
-        class="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+        class="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
       >
         去运行回测
       </button>
