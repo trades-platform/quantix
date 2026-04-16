@@ -3,7 +3,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Column, Date, DateTime, Decimal as SQLDecimal, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, Date, DateTime, Numeric, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, relationship
 
 
@@ -21,14 +21,14 @@ class Backtest(Base):
     symbol = Column(String(20), nullable=False)
     start_date = Column(Date, nullable=False)
     end_date = Column(Date, nullable=False)
-    initial_capital = Column(SQLDecimal(15, 2), nullable=False)
-    commission = Column(SQLDecimal(8, 4), nullable=False)
+    initial_capital = Column(Numeric(15, 2), nullable=False)
+    commission = Column(Numeric(8, 4), nullable=False)
     status = Column(String(20), nullable=False, default="pending")
-    total_return = Column(SQLDecimal(10, 4), nullable=True)
-    annual_return = Column(SQLDecimal(10, 4), nullable=True)
-    sharpe_ratio = Column(SQLDecimal(10, 4), nullable=True)
-    max_drawdown = Column(SQLDecimal(10, 4), nullable=True)
-    win_rate = Column(SQLDecimal(10, 4), nullable=True)
+    total_return = Column(Numeric(10, 4), nullable=True)
+    annual_return = Column(Numeric(10, 4), nullable=True)
+    sharpe_ratio = Column(Numeric(10, 4), nullable=True)
+    max_drawdown = Column(Numeric(10, 4), nullable=True)
+    win_rate = Column(Numeric(10, 4), nullable=True)
     equity_curve = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -44,7 +44,7 @@ class Trade(Base):
     backtest_id = Column(Integer, ForeignKey("backtests.id"), nullable=False)
     symbol = Column(String(20), nullable=False)
     side = Column(String(10), nullable=False)
-    price = Column(SQLDecimal(15, 2), nullable=False)
+    price = Column(Numeric(15, 2), nullable=False)
     quantity = Column(Integer, nullable=False)
     timestamp = Column(DateTime, nullable=False)
 

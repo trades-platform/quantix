@@ -1,11 +1,15 @@
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.api.router import api_router
+from backend.api.router import add_cors_middleware, api_router
 
 app = FastAPI(title="Quantix", description="量化回测平台")
+
+# 添加 CORS 支持
+add_cors_middleware(app)
 
 app.include_router(api_router, prefix="/api")
 
