@@ -3,19 +3,29 @@
 import json
 from pathlib import Path
 
-CONFIG_PATH = Path.home() / ".quantix" / "config.json"
+GLOBAL_CONFIG_PATH = Path.home() / ".quantix" / "config.json"
+LOCAL_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "config.json"
+
+
+def _find_config() -> Path:
+    """查找配置文件，优先使用项目本地配置，其次使用全局配置"""
+    if LOCAL_CONFIG_PATH.exists():
+        return LOCAL_CONFIG_PATH
+    if GLOBAL_CONFIG_PATH.exists():
+        return GLOBAL_CONFIG_PATH
+    raise FileNotFoundError(
+        f"配置文件不存在，已搜索:\n"
+        f"  1. {LOCAL_CONFIG_PATH}\n"
+        f"  2. {GLOBAL_CONFIG_PATH}\n"
+        f"请创建配置文件，内容如下:\n"
+        f'{{"tgw": {{"username": "xxx", "password": "xxx", "host": "xxx", "port": xxx}}}}'
+    )
 
 
 def load_config() -> dict:
     """加载配置文件"""
-    if not CONFIG_PATH.exists():
-        raise FileNotFoundError(
-            f"配置文件不存在: {CONFIG_PATH}\n"
-            f"请创建配置文件，内容如下:\n"
-            f'{{"tgw": {{"username": "xxx", "password": "xxx", "host": "xxx", "port": xxx}}}}'
-        )
-
-    with open(CONFIG_PATH) as f:
+    config_path = _find_config()
+    with open(config_path) as f:
         return json.load(f)
 
 
