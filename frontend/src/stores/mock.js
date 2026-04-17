@@ -111,16 +111,16 @@ def handle_bar(context, bar):
 ]
 
 export const mockSymbols = [
-  '600000.SH',
-  '600036.SH',
-  '600519.SH',
-  '600887.SH',
-  '000001.SZ',
-  '000002.SZ',
-  '000333.SZ',
-  '000858.SZ',
-  '300001.SZ',
-  '300750.SZ'
+  { symbol: '600000.SH', name: '浦发银行', data_type: 'stock', row_count: 1250, latest_timestamp: '2024-04-15T15:00:00Z' },
+  { symbol: '600036.SH', name: '招商银行', data_type: 'stock', row_count: 1180, latest_timestamp: '2024-04-15T15:00:00Z' },
+  { symbol: '600519.SH', name: '贵州茅台', data_type: 'stock', row_count: 1320, latest_timestamp: '2024-04-15T15:00:00Z' },
+  { symbol: '600887.SH', name: '伊利股份', data_type: 'stock', row_count: 1100, latest_timestamp: '2024-04-15T15:00:00Z' },
+  { symbol: '000001.SZ', name: '平安银行', data_type: 'stock', row_count: 1280, latest_timestamp: '2024-04-15T15:00:00Z' },
+  { symbol: '000002.SZ', name: '万科A', data_type: 'stock', row_count: 1150, latest_timestamp: '2024-04-15T15:00:00Z' },
+  { symbol: '000333.SZ', name: '美的集团', data_type: 'stock', row_count: 1050, latest_timestamp: '2024-04-15T15:00:00Z' },
+  { symbol: '000858.SZ', name: '五粮液', data_type: 'stock', row_count: 1190, latest_timestamp: '2024-04-15T15:00:00Z' },
+  { symbol: '300001.SZ', name: '特锐德', data_type: 'stock', row_count: 980, latest_timestamp: '2024-04-15T15:00:00Z' },
+  { symbol: '300750.SZ', name: '宁德时代', data_type: 'stock', row_count: 850, latest_timestamp: '2024-04-15T15:00:00Z' }
 ]
 
 export const generateMockKlineData = (symbol = '600000.SH', days = 100) => {

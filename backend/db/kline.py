@@ -1,12 +1,14 @@
 """LanceDB K线数据操作层"""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 import pyarrow as pa
 
 from backend.db.lancedb import get_kline_db
+from backend.db.sqlite import SessionLocal
+from backend.models import Symbol
 
 # K线数据表 Schema
 KLINE_SCHEMA = pa.schema(
@@ -79,6 +81,29 @@ def import_kline(symbol: str, data: pd.DataFrame) -> int:
     if len(new_data) > 0:
         table.add(new_data)
 
+        # Upsert Symbol metadata after successful import
+        with SessionLocal() as session:
+            existing = session.query(Symbol).filter(Symbol.symbol == symbol).first()
+            total_rows = table.count_rows()
+            ts_min = data["timestamp"].min()
+            ts_max = data["timestamp"].max()
+            if existing:
+                existing.latest_timestamp = ts_max
+                if not existing.earliest_timestamp or existing.earliest_timestamp.year == 1970:
+                    existing.earliest_timestamp = ts_min
+                else:
+                    existing.earliest_timestamp = min(existing.earliest_timestamp, ts_min)
+                existing.row_count = total_rows
+                existing.updated_at = datetime.now(timezone.utc)
+            else:
+                session.add(Symbol(
+                    symbol=symbol,
+                    earliest_timestamp=ts_min,
+                    latest_timestamp=ts_max,
+                    row_count=total_rows,
+                ))
+            session.commit()
+
     return len(new_data)
 
 
@@ -129,6 +154,13 @@ def list_symbols() -> list[str]:
     Returns:
         标的代码列表
     """
+    # Try querying from Symbol model first
+    with SessionLocal() as session:
+        symbols = [s.symbol for s in session.query(Symbol.symbol).all()]
+        if symbols:
+            return sorted(symbols)
+
+    # Fallback to LanceDB scan if no records found
     db = get_kline_db()
     table_names = _get_table_list(db)
 

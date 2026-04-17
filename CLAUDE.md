@@ -72,5 +72,6 @@ quantix serve --port 3000
 
 ## Git 提交规则
 
+- 用英文描述
 - 每次提交必须带 `Signed-off-by` trailer（`git commit -s`）
 - 提交信息中不得包含 Claude Code、Copilot 等第三方工具的标记（如 `Generated with`、`Co-Authored-By` 等）

@@ -7,7 +7,8 @@ from fastapi import APIRouter, HTTPException, UploadFile, status
 from pydantic import BaseModel
 import pandas as pd
 
-from backend.db import import_kline, list_symbols, query_kline
+from backend.db import SessionLocal, import_kline, list_symbols, query_kline
+from backend.models import Symbol
 
 router = APIRouter(prefix="/data", tags=["data"])
 
@@ -20,24 +21,53 @@ class KlineImportRequest(BaseModel):
     data: List[dict]
 
 
+class FetchKlineRequest(BaseModel):
+    symbol: str
+    period: str = "min1"
+    start_date: str
+    end_date: str
+
+
+class FetchBatchRequest(BaseModel):
+    symbols: list[str]
+    period: str = "min1"
+    start_date: str
+    end_date: str
+
+
 class SymbolResponse(BaseModel):
     symbol: str
 
 
-@router.get("/symbols", response_model=List[str])
+@router.get("/symbols")
 def get_symbols():
     """获取可用标的列表"""
-    return list_symbols()
+    with SessionLocal() as db:
+        symbols = db.query(Symbol).order_by(Symbol.symbol).all()
+        return [
+            {
+                "symbol": s.symbol,
+                "name": s.name,
+                "data_type": s.data_type,
+                "earliest_timestamp": s.earliest_timestamp.isoformat() if s.earliest_timestamp else None,
+                "latest_timestamp": s.latest_timestamp.isoformat() if s.latest_timestamp else None,
+                "row_count": s.row_count,
+                "period": s.period,
+                "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+            }
+            for s in symbols
+        ]
 
 
 @router.get("/kline")
-def get_kline_data(symbol: str, start_date: str | None = None, end_date: str | None = None):
+def get_kline_data(symbol: str, start_date: str | None = None, end_date: str | None = None, limit: int | None = None):
     """获取K线数据
 
     Args:
         symbol: 标的代码
         start_date: 开始日期 YYYY-MM-DD
         end_date: 结束日期 YYYY-MM-DD
+        limit: 返回最近的 N 条数据
     """
     try:
         start_dt = datetime.strptime(start_date, "%Y-%m-%d") if start_date else None
@@ -46,6 +76,10 @@ def get_kline_data(symbol: str, start_date: str | None = None, end_date: str | N
         raise HTTPException(status_code=400, detail=f"Invalid date format: {e}")
 
     data = query_kline(symbol, start_dt, end_dt)
+
+    # 限制返回条数（取最近的 N 条）
+    if limit and limit > 0 and len(data) > limit:
+        data = data.iloc[-limit:]
 
     # 转换为 JSON 友好格式
     result = []
@@ -98,3 +132,65 @@ async def upload_kline_file(symbol: str, file: UploadFile):
         return {"message": f"成功导入 {count} 条数据", "count": count}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"文件解析失败: {e}")
+
+
+@router.post("/kline/fetch")
+def fetch_kline_data(req: FetchKlineRequest):
+    """从远程获取并导入K线数据"""
+    from backend.data import fetch_kline as data_fetch_kline
+    import AmazingData as AD
+
+    period_map = {
+        "min1": AD.constant.Period.min1.value,
+        "min5": AD.constant.Period.min5.value,
+        "min15": AD.constant.Period.min15.value,
+        "min30": AD.constant.Period.min30.value,
+        "min60": AD.constant.Period.min60.value,
+        "day": AD.constant.Period.day.value,
+        "week": AD.constant.Period.week.value,
+        "month": AD.constant.Period.month.value,
+    }
+    if req.period not in period_map:
+        raise HTTPException(status_code=400, detail=f"Invalid period: {req.period}")
+
+    try:
+        count = data_fetch_kline(req.symbol, period_map[req.period], req.start_date, req.end_date)
+        return {"symbol": req.symbol, "count": count, "message": "导入完成"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/kline/fetch-batch")
+def fetch_batch_data(req: FetchBatchRequest):
+    """批量从远程获取并导入K线数据"""
+    from backend.data import fetch_kline as data_fetch_kline
+    import AmazingData as AD
+
+    period_map = {
+        "min1": AD.constant.Period.min1.value,
+        "min5": AD.constant.Period.min5.value,
+        "min15": AD.constant.Period.min15.value,
+        "min30": AD.constant.Period.min30.value,
+        "min60": AD.constant.Period.min60.value,
+        "day": AD.constant.Period.day.value,
+        "week": AD.constant.Period.week.value,
+        "month": AD.constant.Period.month.value,
+    }
+    if req.period not in period_map:
+        raise HTTPException(status_code=400, detail=f"Invalid period: {req.period}")
+
+    results = []
+    errors = []
+    for sym in req.symbols:
+        try:
+            count = data_fetch_kline(sym, period_map[req.period], req.start_date, req.end_date)
+            results.append({"symbol": sym, "count": count})
+        except Exception as e:
+            errors.append({"symbol": sym, "error": str(e)})
+
+    return {
+        "success": len(results),
+        "failed": len(errors),
+        "results": results,
+        "errors": errors,
+    }

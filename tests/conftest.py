@@ -58,6 +58,7 @@ def client(db_session):
     backend.db.sqlite.SessionLocal = override_session
     backend.api.strategies.SessionLocal = override_session
     backend.api.backtests.SessionLocal = override_session
+    backend.api.data.SessionLocal = override_session
     backend.db.SessionLocal = override_session
 
     # 创建测试客户端
@@ -69,6 +70,7 @@ def client(db_session):
     backend.db.sqlite.SessionLocal = original_session
     backend.api.strategies.SessionLocal = original_session
     backend.api.backtests.SessionLocal = original_session
+    backend.api.data.SessionLocal = original_session
     backend.db.SessionLocal = original_session
 
 

@@ -19,12 +19,15 @@ def _ensure_login():
     if _logged_in:
         return
     creds = get_tgw_credentials()
-    AD.login(
-        creds["username"],
-        creds["password"],
-        creds["host"],
-        creds["port"],
-    )
+    try:
+        AD.login(
+            creds["username"],
+            creds["password"],
+            creds["host"],
+            creds["port"],
+        )
+    except SystemExit:
+        raise RuntimeError("TGW 登录失败，请检查网络连接和配置信息")
     _logged_in = True
 
 

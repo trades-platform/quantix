@@ -35,7 +35,7 @@ export const useDataStore = defineStore('data', () => {
     error.value = null
     try {
       const response = await api.getKline(params)
-      klineData.value = response.data
+      klineData.value = response.data.data ?? response.data
       selectedSymbol.value = params.symbol
       return response.data
     } catch (err) {
@@ -46,23 +46,37 @@ export const useDataStore = defineStore('data', () => {
     }
   }
 
-  const importKline = async (api, data) => {
+  const clearKlineData = () => {
+    klineData.value = []
+    selectedSymbol.value = null
+  }
+
+  const fetchSingleKline = async (api, params) => {
     loading.value = true
     error.value = null
     try {
-      const response = await api.importKline(data)
+      const response = await api.fetchKline(params)
       return response.data
     } catch (err) {
-      error.value = err.message || '导入数据失败'
+      error.value = err.message || '获取K线数据失败'
       throw err
     } finally {
       loading.value = false
     }
   }
 
-  const clearKlineData = () => {
-    klineData.value = []
-    selectedSymbol.value = null
+  const fetchBatchKline = async (api, params) => {
+    loading.value = true
+    error.value = null
+    try {
+      const response = await api.fetchKlineBatch(params)
+      return response.data
+    } catch (err) {
+      error.value = err.message || '批量获取K线数据失败'
+      throw err
+    } finally {
+      loading.value = false
+    }
   }
 
   return {
@@ -75,7 +89,8 @@ export const useDataStore = defineStore('data', () => {
     hasData,
     fetchSymbols,
     fetchKline,
-    importKline,
-    clearKlineData
+    clearKlineData,
+    fetchSingleKline,
+    fetchBatchKline
   }
 })

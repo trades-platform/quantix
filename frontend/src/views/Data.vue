@@ -13,20 +13,37 @@ const notificationStore = useNotificationStore()
 const klineLoading = ref(false)
 const klineStats = ref(null)
 
-const importForm = ref({
-  symbol: '',
-  file: null,
-})
-
-const showImportDialog = ref(false)
-const importing = ref(false)
 const searchQuery = ref('')
+
+// Fetch form state
+const showFetchDialog = ref(false)
+const fetchForm = ref({
+  symbol: '',
+  period: 'min1',
+  startDate: '',
+  endDate: ''
+})
+const fetching = ref(false)
+
+// Batch fetch form state
+const showBatchFetchDialog = ref(false)
+const batchFetchForm = ref({
+  symbols: '',
+  period: 'min1',
+  startDate: '',
+  endDate: ''
+})
+const batchFetching = ref(false)
+const batchFetchResults = ref([])
 
 const filteredSymbols = computed(() => {
   if (!searchQuery.value) return symbols.value
-  return symbols.value.filter((s) =>
-    s.toLowerCase().includes(searchQuery.value.toLowerCase())
-  )
+  const query = searchQuery.value.toLowerCase()
+  return symbols.value.filter((s) => {
+    const symbol = typeof s === 'string' ? s : s.symbol
+    const name = typeof s === 'string' ? '' : (s.name || '')
+    return symbol.toLowerCase().includes(query) || name.toLowerCase().includes(query)
+  })
 })
 
 const fetchSymbols = async () => {
@@ -76,65 +93,109 @@ const calculateStats = () => {
   }
 }
 
-const handleFileChange = (event) => {
-  const file = event.target.files[0]
-  if (file) {
-    if (!file.name.endsWith('.csv')) {
-      notificationStore.warning('请上传CSV格式文件')
-      event.target.value = ''
-      return
-    }
-    importForm.value.file = file
-  }
+const formatDate = (dateStr) => {
+  return new Date(dateStr).toLocaleString('zh-CN', { hour12: false })
 }
 
-const importKline = async () => {
-  if (!importForm.value.symbol.trim()) {
+const toLocalDateStr = (date) => {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+const openFetchDialog = () => {
+  const today = new Date()
+  const lastMonth = new Date(today)
+  lastMonth.setMonth(lastMonth.getMonth() - 1)
+
+  fetchForm.value = {
+    symbol: '',
+    period: 'min1',
+    startDate: '1970-01-01',
+    endDate: toLocalDateStr(today)
+  }
+  showFetchDialog.value = true
+}
+
+const handleFetchKline = async () => {
+  if (!fetchForm.value.symbol.trim()) {
     notificationStore.warning('请输入标的代码')
     return
   }
 
-  if (!importForm.value.file) {
-    notificationStore.warning('请选择数据文件')
+  fetching.value = true
+  try {
+    const result = await dataStore.fetchSingleKline(dataApi, {
+      symbol: fetchForm.value.symbol,
+      period: fetchForm.value.period,
+      start_date: fetchForm.value.startDate,
+      end_date: fetchForm.value.endDate
+    })
+    if (result.count > 0) {
+      notificationStore.success(`数据获取成功，共获取 ${result.count} 条数据`)
+      showFetchDialog.value = false
+      await fetchSymbols()
+    } else {
+      notificationStore.warning(`未获取到数据，请检查标的代码和日期范围是否正确`)
+    }
+  } catch (error) {
+    notificationStore.error('获取数据失败: ' + (error.response?.data?.detail || error.message))
+  } finally {
+    fetching.value = false
+  }
+}
+
+const openBatchFetchDialog = () => {
+  const today = new Date()
+  const lastMonth = new Date(today)
+  lastMonth.setMonth(lastMonth.getMonth() - 1)
+
+  batchFetchForm.value = {
+    symbols: '',
+    period: 'min1',
+    startDate: '1970-01-01',
+    endDate: toLocalDateStr(today)
+  }
+  batchFetchResults.value = []
+  showBatchFetchDialog.value = true
+}
+
+const handleBatchFetchKline = async () => {
+  const symbolsText = batchFetchForm.value.symbols.trim()
+  if (!symbolsText) {
+    notificationStore.warning('请输入标的代码')
     return
   }
 
-  importing.value = true
-  const formData = new FormData()
-  formData.append('symbol', importForm.value.symbol)
-  formData.append('file', importForm.value.file)
+  const symbols = symbolsText.split(/[\n,]+/).map(s => s.trim()).filter(s => s)
+  if (symbols.length === 0) {
+    notificationStore.warning('请输入有效的标的代码')
+    return
+  }
 
+  batchFetching.value = true
   try {
-    const response = await dataStore.importKline(dataApi, formData)
-    const count = response.count || 0
-    notificationStore.success(`导入成功，共导入 ${count} 条数据`)
-    showImportDialog.value = false
-    importForm.value = { symbol: '', file: null }
+    const result = await dataStore.fetchBatchKline(dataApi, {
+      symbols,
+      period: batchFetchForm.value.period,
+      start_date: batchFetchForm.value.startDate,
+      end_date: batchFetchForm.value.endDate
+    })
+    batchFetchResults.value = result.results || []
+    const errors = result.errors || []
+    if (errors.length > 0) {
+      notificationStore.warning(`批量获取完成，${result.success} 个成功，${result.failed} 个失败`)
+    } else {
+      const totalCount = batchFetchResults.value.reduce((sum, r) => sum + r.count, 0)
+      notificationStore.success(`批量获取完成，共获取 ${totalCount} 条数据`)
+    }
     await fetchSymbols()
   } catch (error) {
-    notificationStore.error('导入失败: ' + (error.response?.data?.detail || error.message))
+    notificationStore.error('批量获取失败: ' + (error.response?.data?.detail || error.message))
   } finally {
-    importing.value = false
+    batchFetching.value = false
   }
-}
-
-const formatDate = (dateStr) => {
-  return new Date(dateStr).toLocaleDateString('zh-CN')
-}
-
-const downloadTemplate = () => {
-  const csv = `timestamp,open,high,low,close,volume
-2024-01-01,10.50,10.80,10.40,10.70,1000000
-2024-01-02,10.70,10.90,10.60,10.85,1200000
-2024-01-03,10.85,11.00,10.75,10.95,1500000`
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = 'kline_template.csv'
-  a.click()
-  URL.revokeObjectURL(url)
-  notificationStore.success('模板下载成功')
 }
 
 const selectSymbol = (symbol) => {
@@ -160,27 +221,50 @@ watch(selectedSymbol, () => {
         <h1 class="text-3xl font-bold text-gray-900">数据管理</h1>
         <p class="mt-1 text-gray-600">管理K线数据和查看行情信息</p>
       </div>
-      <button
-        @click="showImportDialog = true"
-        class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center transition-colors"
-      >
-        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-        </svg>
-        导入数据
-      </button>
+      <div class="flex space-x-3">
+        <button
+          @click="openFetchDialog"
+          class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center transition-colors"
+        >
+          <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          获取数据
+        </button>
+        <button
+          @click="openBatchFetchDialog"
+          class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 flex items-center transition-colors"
+        >
+          <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+          </svg>
+          批量获取
+        </button>
+      </div>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
       <div class="lg:col-span-1">
         <div class="bg-white rounded-lg shadow">
           <div class="p-4 border-b">
-            <input
-              v-model="searchQuery"
-              type="text"
-              placeholder="搜索标的代码..."
-              class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
+            <div class="flex space-x-2">
+              <input
+                v-model="searchQuery"
+                type="text"
+                placeholder="搜索标的代码或名称..."
+                class="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <button
+                @click="fetchSymbols"
+                :disabled="loading"
+                class="px-3 py-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                title="刷新列表"
+              >
+                <svg :class="{ 'animate-spin': loading }" class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
+            </div>
           </div>
 
           <div class="max-h-96 overflow-y-auto">
@@ -195,16 +279,52 @@ watch(selectedSymbol, () => {
               <p class="mt-2 text-sm">{{ searchQuery ? '未找到匹配的标的' : '暂无数据' }}</p>
             </div>
             <div v-else>
-              <div
-                v-for="symbol in filteredSymbols"
-                :key="symbol"
-                @click="selectSymbol(symbol)"
-                class="px-4 py-3 hover:bg-gray-50 cursor-pointer border-b last:border-b-0 transition-colors"
-                :class="{ 'bg-blue-50 border-l-4 border-l-blue-500': selectedSymbol === symbol }"
-              >
-                <div class="font-medium text-gray-900">{{ symbol }}</div>
-                <div class="text-xs text-gray-500 mt-1">点击查看K线数据</div>
-              </div>
+              <table class="min-w-full">
+                <thead class="bg-gray-50 sticky top-0">
+                  <tr>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">标的</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">名称</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">类型</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">起始时间</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">结束时间</th>
+                    <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">数据量</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200 bg-white">
+                  <tr
+                    v-for="item in filteredSymbols"
+                    :key="typeof item === 'string' ? item : item.symbol"
+                    @click="selectSymbol(typeof item === 'string' ? item : item.symbol)"
+                    class="hover:bg-gray-50 cursor-pointer transition-colors"
+                    :class="{ 'bg-blue-50': selectedSymbol === (typeof item === 'string' ? item : item.symbol) }"
+                  >
+                    <td class="px-4 py-3 whitespace-nowrap">
+                      <div class="font-medium text-gray-900">{{ typeof item === 'string' ? item : item.symbol }}</div>
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                      {{ typeof item === 'string' ? '-' : (item.name || '-') }}
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm">
+                      <span class="px-2 py-1 text-xs rounded" :class="{
+                        'bg-blue-100 text-blue-800': (typeof item === 'string' ? 'stock' : item.data_type) === 'stock',
+                        'bg-green-100 text-green-800': (typeof item === 'string' ? 'stock' : item.data_type) === 'index',
+                        'bg-purple-100 text-purple-800': (typeof item === 'string' ? 'stock' : item.data_type) === 'fund'
+                      }">
+                        {{ typeof item === 'string' ? '股票' : (item.data_type === 'stock' ? '股票' : item.data_type === 'index' ? '指数' : item.data_type === 'fund' ? '基金' : item.data_type) }}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                      {{ typeof item === 'string' ? '-' : (item.earliest_timestamp ? item.earliest_timestamp.split('T')[0] : '-') }}
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                      {{ typeof item === 'string' ? '-' : (item.latest_timestamp ? item.latest_timestamp.split('T')[0] : '-') }}
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600 text-right">
+                      {{ typeof item === 'string' ? '-' : (item.row_count?.toLocaleString() || '-') }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
 
@@ -315,15 +435,15 @@ watch(selectedSymbol, () => {
 
     <Teleport to="body">
       <div
-        v-if="showImportDialog"
-        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
-        @click.self="showImportDialog = false"
+        v-if="showFetchDialog"
+        class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+        @click.self="showFetchDialog = false"
       >
         <div class="bg-white rounded-lg shadow-xl w-full max-w-md">
           <div class="px-6 py-4 border-b flex justify-between items-center">
-            <h2 class="text-xl font-semibold">导入K线数据</h2>
+            <h2 class="text-xl font-semibold">获取K线数据</h2>
             <button
-              @click="showImportDialog = false"
+              @click="showFetchDialog = false"
               class="text-gray-400 hover:text-gray-600 transition-colors"
             >
               <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -336,60 +456,134 @@ watch(selectedSymbol, () => {
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">标的代码 <span class="text-red-500">*</span></label>
               <input
-                v-model="importForm.symbol"
+                v-model="fetchForm.symbol"
                 type="text"
-                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                 placeholder="例如: 600000.SH"
               />
             </div>
 
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">数据文件 (CSV) <span class="text-red-500">*</span></label>
+              <label class="block text-sm font-medium text-gray-700 mb-1">开始日期</label>
               <input
-                type="file"
-                accept=".csv"
-                @change="handleFileChange"
-                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                v-model="fetchForm.startDate"
+                type="date"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
               />
-              <p class="text-xs text-gray-500 mt-1">
-                需包含列: timestamp, open, high, low, close, volume
-              </p>
             </div>
 
-            <div class="bg-blue-50 rounded-lg p-3">
-              <div class="flex items-center justify-between">
-                <div>
-                  <p class="text-sm font-medium text-blue-900">需要CSV模板?</p>
-                  <p class="text-xs text-blue-700">下载示例文件了解格式要求</p>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">结束日期</label>
+              <input
+                v-model="fetchForm.endDate"
+                type="date"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+              />
+            </div>
+          </div>
+
+          <div class="px-6 py-4 bg-gray-50 flex justify-end space-x-3">
+            <button
+              @click="showFetchDialog = false"
+              :disabled="fetching"
+              class="px-4 py-2 border rounded-lg hover:bg-gray-100 disabled:opacity-50 transition-colors"
+            >
+              取消
+            </button>
+            <button
+              @click="handleFetchKline"
+              :disabled="fetching"
+              class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center transition-colors"
+            >
+              <svg v-if="fetching" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              {{ fetching ? '获取中...' : '获取' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="showBatchFetchDialog"
+        class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+        @click.self="showBatchFetchDialog = false"
+      >
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-lg">
+          <div class="px-6 py-4 border-b flex justify-between items-center">
+            <h2 class="text-xl font-semibold">批量获取K线数据</h2>
+            <button
+              @click="showBatchFetchDialog = false"
+              class="text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div class="p-6 space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">标的代码 <span class="text-red-500">*</span></label>
+              <textarea
+                v-model="batchFetchForm.symbols"
+                rows="4"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 font-mono text-sm"
+                placeholder="每行一个标的代码，或用逗号分隔&#10;例如：&#10;600000.SH&#10;600036.SH&#10;000001.SZ"
+              ></textarea>
+              <p class="text-xs text-gray-500 mt-1">支持每行一个或逗号分隔多个标的代码</p>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">开始日期</label>
+              <input
+                v-model="batchFetchForm.startDate"
+                type="date"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+              />
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">结束日期</label>
+              <input
+                v-model="batchFetchForm.endDate"
+                type="date"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+              />
+            </div>
+
+            <div v-if="batchFetchResults.length > 0" class="bg-gray-50 rounded-lg p-4">
+              <h3 class="text-sm font-medium text-gray-900 mb-2">获取结果</h3>
+              <div class="max-h-32 overflow-y-auto text-sm">
+                <div v-for="(result, index) in batchFetchResults" :key="index" class="flex justify-between items-center py-1">
+                  <span class="text-gray-700">{{ result.symbol }}</span>
+                  <span :class="result.count > 0 ? 'text-green-600' : 'text-yellow-600'">{{ result.count }} 条</span>
                 </div>
-                <button
-                  @click="downloadTemplate"
-                  class="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-                >
-                  下载模板
-                </button>
               </div>
             </div>
           </div>
 
           <div class="px-6 py-4 bg-gray-50 flex justify-end space-x-3">
             <button
-              @click="showImportDialog = false"
-              :disabled="importing"
+              @click="showBatchFetchDialog = false"
+              :disabled="batchFetching"
               class="px-4 py-2 border rounded-lg hover:bg-gray-100 disabled:opacity-50 transition-colors"
             >
-              取消
+              关闭
             </button>
             <button
-              @click="importKline"
-              :disabled="importing"
-              class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center transition-colors"
+              @click="handleBatchFetchKline"
+              :disabled="batchFetching"
+              class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center transition-colors"
             >
-              <svg v-if="importing" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+              <svg v-if="batchFetching" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              {{ importing ? '导入中...' : '导入' }}
+              {{ batchFetching ? '获取中...' : '批量获取' }}
             </button>
           </div>
         </div>

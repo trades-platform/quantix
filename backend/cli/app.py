@@ -74,13 +74,21 @@ def import_kline_cmd(
 @data_app.command("list")
 def list_symbols_cmd():
     """列出所有已有数据的标的"""
-    from backend.db import list_symbols
+    from backend.db import SessionLocal
+    from backend.models import Symbol
 
-    symbols = list_symbols()
-    if not symbols:
-        typer.echo("暂无数据")
-    else:
-        typer.echo("\n".join(symbols))
+    with SessionLocal() as db:
+        symbols = db.query(Symbol).order_by(Symbol.symbol).all()
+        if not symbols:
+            typer.echo("暂无数据")
+        else:
+            typer.echo(f"\n{'标的':<15} {'名称':<10} {'类型':<8} {'数据量':<10} {'最新时间'}")
+            typer.echo("-" * 60)
+            for s in symbols:
+                name = s.name or "-"
+                dtype = s.data_type or "-"
+                latest = s.latest_timestamp.strftime("%Y-%m-%d %H:%M") if s.latest_timestamp else "-"
+                typer.echo(f"{s.symbol:<15} {name:<10} {dtype:<8} {s.row_count:<10} {latest}")
 
 
 @data_app.command("show")
