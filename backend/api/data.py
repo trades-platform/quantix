@@ -154,7 +154,7 @@ def fetch_kline_data(req: FetchKlineRequest):
         raise HTTPException(status_code=400, detail=f"Invalid period: {req.period}")
 
     try:
-        count = data_fetch_kline(req.symbol, period_map[req.period], req.start_date, req.end_date)
+        count = data_fetch_kline(req.symbol, period_map[req.period], req.start_date, req.end_date, use_subprocess=True)
         return {"symbol": req.symbol, "count": count, "message": "导入完成"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -183,7 +183,7 @@ def fetch_batch_data(req: FetchBatchRequest):
     errors = []
     for sym in req.symbols:
         try:
-            count = data_fetch_kline(sym, period_map[req.period], req.start_date, req.end_date)
+            count = data_fetch_kline(sym, period_map[req.period], req.start_date, req.end_date, use_subprocess=True)
             results.append({"symbol": sym, "count": count})
         except Exception as e:
             errors.append({"symbol": sym, "error": str(e)})

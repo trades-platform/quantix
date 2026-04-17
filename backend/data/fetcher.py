@@ -69,6 +69,7 @@ def fetch_kline(
     start_date: str | datetime | None = None,
     end_date: str | datetime | None = None,
     increment: bool = False,
+    use_subprocess: bool = False,
 ) -> int:
     """获取并导入K线数据
 
@@ -78,12 +79,11 @@ def fetch_kline(
         start_date: 开始日期 (YYYY-MM-DD)
         end_date: 结束日期 (YYYY-MM-DD)
         increment: 是否增量导入（从最新数据时间到当前）
+        use_subprocess: 是否在子进程中执行 TGW 操作（Web API 用）
 
     Returns:
         导入的行数
     """
-    _ensure_login()
-
     if increment:
         existing_data = db_query_kline(symbol)
         if len(existing_data) > 0:
@@ -96,6 +96,16 @@ def fetch_kline(
 
     if start_date is None or end_date is None:
         raise ValueError("start_date 和 end_date 不能为空，除非使用 --increment")
+
+    if use_subprocess:
+        return _fetch_kline_subprocess(symbol, period, start_date, end_date)
+    else:
+        return _fetch_kline_direct(symbol, period, start_date, end_date)
+
+
+def _fetch_kline_direct(symbol, period, start_date, end_date) -> int:
+    """直接模式：login -> 查询 -> 导入（CLI 用）。"""
+    _ensure_login()
 
     start_int = _date_to_int(start_date)
     end_int = _date_to_int(end_date)
@@ -115,9 +125,19 @@ def fetch_kline(
         return 0
 
     df = _convert_df(df)
-    count = db_import_kline(symbol, df)
+    return db_import_kline(symbol, df)
 
-    return count
+
+def _fetch_kline_subprocess(symbol, period, start_date, end_date) -> int:
+    """子进程模式：在子进程获取数据，父进程导入 LanceDB。"""
+    from backend.data.tgw_worker import fetch_kline_subprocess
+
+    result = fetch_kline_subprocess(symbol, period, start_date, end_date)
+    if not result.success:
+        raise RuntimeError(result.error)
+    if result.data is None:
+        return 0
+    return db_import_kline(symbol, result.data)
 
 
 def fetch_increment(symbol: str, period: int = AD.constant.Period.min1.value) -> int:
@@ -125,15 +145,24 @@ def fetch_increment(symbol: str, period: int = AD.constant.Period.min1.value) ->
     return fetch_kline(symbol, period, increment=True)
 
 
-def get_code_list(data_type: str = "both") -> list[str]:
+def get_code_list(data_type: str = "both", use_subprocess: bool = False) -> list[str]:
     """获取代码列表
 
     Args:
         data_type: "stock" | "etf" | "both"
+        use_subprocess: 是否在子进程中执行（Web API 用）
 
     Returns:
         代码列表
     """
+    if use_subprocess:
+        from backend.data.tgw_worker import get_code_list_subprocess
+
+        result = get_code_list_subprocess(data_type)
+        if not result.success:
+            raise RuntimeError(result.error)
+        return result.data
+
     _ensure_login()
 
     base = AD.BaseData()
@@ -154,6 +183,7 @@ def fetch_all(
     start_date: str | datetime,
     end_date: str | datetime,
     progress: bool = True,
+    use_subprocess: bool = False,
 ) -> dict:
     """批量获取并导入所有标的K线数据
 
@@ -167,9 +197,10 @@ def fetch_all(
     Returns:
         {"success": [...], "failed": [...]} 每类包含 symbol 和 count
     """
-    _ensure_login()
+    if not use_subprocess:
+        _ensure_login()
 
-    codes = get_code_list(data_type)
+    codes = get_code_list(data_type, use_subprocess=use_subprocess)
 
     results = {"success": [], "failed": []}
 
@@ -178,7 +209,7 @@ def fetch_all(
             print(f"[{i+1}/{len(codes)}] 导入 {code}...", file=sys.stderr)
 
         try:
-            count = fetch_kline(code, period, start_date, end_date)
+            count = fetch_kline(code, period, start_date, end_date, use_subprocess=use_subprocess)
             results["success"].append({"symbol": code, "count": count})
         except Exception as e:
             results["failed"].append({"symbol": code, "error": str(e)})
