@@ -27,6 +27,12 @@ def get_table_name(symbol: str) -> str:
     return f"kline_{symbol.replace('.', '_')}"
 
 
+def _get_table_list(db) -> list[str]:
+    """获取数据库中的表名列表（兼容 LanceDB API 变更）"""
+    tables = db.list_tables()
+    return tables.tables if hasattr(tables, 'tables') else list(tables)
+
+
 def import_kline(symbol: str, data: pd.DataFrame) -> int:
     """导入K线数据到 LanceDB
 
@@ -61,7 +67,7 @@ def import_kline(symbol: str, data: pd.DataFrame) -> int:
     data = data.sort_values("timestamp").drop_duplicates(subset=["timestamp"])
 
     # 创建或打开表
-    if table_name not in db.list_tables():
+    if table_name not in _get_table_list(db):
         table = db.create_table(table_name, schema=KLINE_SCHEMA)
     else:
         table = db.open_table(table_name)
@@ -94,7 +100,7 @@ def query_kline(
     db = get_kline_db()
     table_name = get_table_name(symbol)
 
-    if table_name not in db.list_tables():
+    if table_name not in _get_table_list(db):
         return pd.DataFrame()
 
     table = db.open_table(table_name)
@@ -124,7 +130,7 @@ def list_symbols() -> list[str]:
         标的代码列表
     """
     db = get_kline_db()
-    table_names = db.list_tables()
+    table_names = _get_table_list(db)
 
     # 从表名提取标的代码
     symbols = []

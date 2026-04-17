@@ -9,6 +9,26 @@ import typer
 
 app = typer.Typer(name="quantix", help="量化回测平台")
 
+
+def _parse_period(period_str: str) -> int:
+    """解析 K 线周期字符串"""
+    import AmazingData as AD
+
+    period_map = {
+        "min1": AD.constant.Period.min1.value,
+        "min5": AD.constant.Period.min5.value,
+        "min15": AD.constant.Period.min15.value,
+        "min30": AD.constant.Period.min30.value,
+        "min60": AD.constant.Period.min60.value,
+        "day": AD.constant.Period.day.value,
+        "week": AD.constant.Period.week.value,
+        "month": AD.constant.Period.month.value,
+    }
+    if period_str not in period_map:
+        raise typer.BadParameter(f"不支持的周期: {period_str}，可选: {list(period_map.keys())}")
+    return period_map[period_str]
+
+
 # 数据管理子命令
 data_app = typer.Typer(name="data", help="数据管理")
 app.add_typer(data_app, name="data")
@@ -84,6 +104,123 @@ def show_kline_cmd(
 
     typer.echo(f"\n{symbol} K线数据 (共 {len(data)} 条):\n")
     typer.echo(data.head(limit).to_string(index=False))
+
+
+@data_app.command("fetch")
+def fetch_kline_cmd(
+    symbol: str = typer.Argument(..., help="标的代码，如 600000.SH"),
+    period: str = typer.Option("min1", help="K线周期: min1/min5/min15/min30/min60/day/week/month"),
+    start_date: str | None = typer.Option(None, help="开始日期 YYYY-MM-DD"),
+    end_date: str | None = typer.Option(None, help="结束日期 YYYY-MM-DD"),
+    increment: bool = typer.Option(False, help="增量导入（从最新数据时间到当前）"),
+):
+    """从 AmazingData 获取并导入K线数据"""
+    from backend.data import fetch_kline as data_fetch_kline
+
+    period_int = _parse_period(period)
+
+    try:
+        count = data_fetch_kline(
+            symbol,
+            period_int,
+            start_date,
+            end_date,
+            increment,
+        )
+        if increment:
+            typer.echo(f"增量导入完成: {symbol} 新增 {count} 条数据")
+        else:
+            typer.echo(f"导入完成: {symbol} 共 {count} 条数据")
+    except Exception as e:
+        typer.echo(f"获取失败: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@data_app.command("fetch-all")
+def fetch_all_cmd(
+    data_type: str = typer.Option("both", help="数据类型: stock/etf/both"),
+    period: str = typer.Option("min1", help="K线周期: min1/min5/min15/min30/min60/day/week/month"),
+    start_date: str = typer.Option(..., help="开始日期 YYYY-MM-DD"),
+    end_date: str = typer.Option(..., help="结束日期 YYYY-MM-DD"),
+):
+    """批量获取并导入所有股票/ETF的K线数据"""
+    from backend.data import fetch_all as data_fetch_all
+
+    period_int = _parse_period(period)
+
+    valid_types = ["stock", "etf", "both"]
+    if data_type not in valid_types:
+        raise typer.BadParameter(f"无效类型: {data_type}，可选: {valid_types}")
+
+    try:
+        results = data_fetch_all(
+            data_type,
+            period_int,
+            start_date,
+            end_date,
+        )
+
+        success_count = len(results["success"])
+        failed_count = len(results["failed"])
+
+        typer.echo(f"\n批量导入完成:")
+        typer.echo(f"  成功: {success_count}")
+        typer.echo(f"  失败: {failed_count}")
+
+        if results["failed"]:
+            typer.echo("\n失败标的:")
+            for item in results["failed"][:10]:
+                typer.echo(f"  {item['symbol']}: {item['error']}")
+            if len(results["failed"]) > 10:
+                typer.echo(f"  ... 还有 {len(results['failed']) - 10} 个")
+
+    except Exception as e:
+        typer.echo(f"获取失败: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@data_app.command("fetch-batch")
+def fetch_batch_cmd(
+    symbols: list[str] = typer.Argument(..., help="标的代码列表，如 600000.SH 000001.SZ"),
+    period: str = typer.Option("min1", help="K线周期: min1/min5/min15/min30/min60/day/week/month"),
+    start_date: str | None = typer.Option(None, help="开始日期 YYYY-MM-DD"),
+    end_date: str | None = typer.Option(None, help="结束日期 YYYY-MM-DD"),
+    increment: bool = typer.Option(False, help="增量导入（从最新数据时间到当前）"),
+):
+    """批量获取并导入指定标的的K线数据"""
+    from backend.data import fetch_kline as data_fetch_kline
+
+    period_int = _parse_period(period)
+
+    success = []
+    failed = []
+
+    for i, symbol in enumerate(symbols, 1):
+        typer.echo(f"[{i}/{len(symbols)}] 导入 {symbol}...")
+        try:
+            count = data_fetch_kline(
+                symbol,
+                period_int,
+                start_date,
+                end_date,
+                increment,
+            )
+            success.append({"symbol": symbol, "count": count})
+        except Exception as e:
+            failed.append({"symbol": symbol, "error": str(e)})
+            typer.echo(f"  失败: {e}", err=True)
+
+    typer.echo(f"\n批量导入完成:")
+    typer.echo(f"  成功: {len(success)}")
+    typer.echo(f"  失败: {len(failed)}")
+
+    if failed:
+        typer.echo("\n失败标的:")
+        for item in failed:
+            typer.echo(f"  {item['symbol']}: {item['error']}")
+
+    if failed:
+        raise typer.Exit(1)
 
 
 # 回测子命令
