@@ -8,7 +8,8 @@ import logging
 import traceback
 from dataclasses import dataclass
 from datetime import datetime
-import multiprocessing
+from multiprocessing import get_context
+from pathlib import Path
 from queue import Empty
 
 import pandas as pd
@@ -148,9 +149,59 @@ def _worker_code_list(result_queue, data_type: str):
             pass
 
 
+def _worker_factor(result_queue, code_list: list[str]):
+    """子进程：login -> 获取后复权因子 -> logout -> 通过 Queue 返回结果。"""
+    import AmazingData as AD
+
+    from backend.data.pandas_compat import patch_fillna, restore_fillna
+
+    original = patch_fillna()
+
+    creds = get_tgw_credentials()
+    username = creds["username"]
+    try:
+        AD.login(creds["username"], creds["password"], creds["host"], creds["port"])
+    except SystemExit:
+        result_queue.put(TgwResult(success=False, error="TGW 登录失败"))
+        return
+    except Exception as e:
+        result_queue.put(TgwResult(success=False, error=f"TGW 登录异常: {e}"))
+        return
+
+    try:
+        local_path = str(Path(__file__).resolve().parents[2] / "data" / "tgw_cachebasedata")
+        base = AD.BaseData()
+        raw_df = base.get_backward_factor(code_list, local_path=local_path, is_local=False)
+
+        if raw_df is None or raw_df.empty:
+            result_queue.put(TgwResult(success=True, data={}))
+            return
+
+        # Convert wide DataFrame to dict of per-symbol DataFrames
+        result = {}
+        raw_df.index = pd.to_datetime(raw_df.index)
+        for col in raw_df.columns:
+            symbol_df = pd.DataFrame({
+                "timestamp": raw_df.index,
+                "factor": raw_df[col].values,
+            })
+            symbol_df = symbol_df.dropna(subset=["factor"])
+            result[col] = symbol_df
+
+        result_queue.put(TgwResult(success=True, data=result))
+    except Exception as e:
+        result_queue.put(TgwResult(success=False, error=f"TGW 查询异常: {e}\n{traceback.format_exc()}"))
+    finally:
+        restore_fillna(original)
+        try:
+            AD.logout(username)
+        except Exception:
+            pass
+
+
 def _run_worker(target_fn, args: tuple, timeout: int = DEFAULT_FETCH_TIMEOUT) -> TgwResult:
     """启动子进程运行 target_fn，带超时处理。使用 spawn 创建干净进程。"""
-    ctx = multiprocessing.get_context("spawn")
+    ctx = get_context("spawn")
     result_queue = ctx.Queue()
     process = ctx.Process(target=target_fn, args=(result_queue, *args))
     process.start()
@@ -197,3 +248,11 @@ def get_code_list_subprocess(
 ) -> TgwResult:
     """在子进程中获取代码列表，返回 TgwResult。"""
     return _run_worker(_worker_code_list, (data_type,), timeout)
+
+
+def fetch_factor_subprocess(
+    code_list: list[str],
+    timeout: int = DEFAULT_FETCH_TIMEOUT,
+) -> TgwResult:
+    """在子进程中获取后复权因子数据，返回 TgwResult。"""
+    return _run_worker(_worker_factor, (code_list,), timeout)

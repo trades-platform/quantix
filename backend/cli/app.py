@@ -231,6 +231,110 @@ def fetch_batch_cmd(
         raise typer.Exit(1)
 
 
+# ---- Factor 命令 ----
+
+
+@data_app.command("factor-fetch")
+def fetch_factor_cmd(
+    symbol: str = typer.Argument(..., help="标的代码，如 600000.SH"),
+):
+    """从 AmazingData 获取并导入后复权因子数据"""
+    from backend.data import fetch_factor as data_fetch_factor
+
+    try:
+        count = data_fetch_factor(symbol)
+        typer.echo(f"导入完成: {symbol} 压缩后 {count} 条因子数据")
+    except Exception as e:
+        typer.echo(f"获取失败: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@data_app.command("factor-fetch-batch")
+def fetch_factor_batch_cmd(
+    symbols: list[str] = typer.Argument(..., help="标的代码列表"),
+):
+    """批量获取并导入指定标的的后复权因子数据"""
+    from backend.data import fetch_factor_batch as data_fetch_factor_batch
+
+    try:
+        results = data_fetch_factor_batch(symbols)
+        success_count = len(results["success"])
+        failed_count = len(results["failed"])
+        typer.echo(f"\n批量导入完成: 成功 {success_count}, 失败 {failed_count}")
+        if results["failed"]:
+            typer.echo("\n失败标的:")
+            for item in results["failed"][:10]:
+                typer.echo(f"  {item['symbol']}: {item['error']}")
+            if len(results["failed"]) > 10:
+                typer.echo(f"  ... 还有 {len(results['failed']) - 10} 个")
+    except Exception as e:
+        typer.echo(f"获取失败: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@data_app.command("factor-fetch-all")
+def fetch_factor_all_cmd(
+    data_type: str = typer.Option("both", help="数据类型: stock/etf/both"),
+):
+    """批量获取所有股票/ETF的后复权因子数据"""
+    from backend.data import fetch_factor_all as data_fetch_factor_all
+
+    valid_types = ["stock", "etf", "both"]
+    if data_type not in valid_types:
+        raise typer.BadParameter(f"无效类型: {data_type}，可选: {valid_types}")
+
+    try:
+        results = data_fetch_factor_all(data_type)
+        success_count = len(results["success"])
+        failed_count = len(results["failed"])
+        typer.echo(f"\n批量导入完成: 成功 {success_count}, 失败 {failed_count}")
+        if results["failed"]:
+            typer.echo("\n失败标的:")
+            for item in results["failed"][:10]:
+                typer.echo(f"  {item['symbol']}: {item['error']}")
+            if len(results["failed"]) > 10:
+                typer.echo(f"  ... 还有 {len(results['failed']) - 10} 个")
+    except Exception as e:
+        typer.echo(f"获取失败: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@data_app.command("factor-list")
+def list_factor_symbols_cmd():
+    """列出已有后复权因子数据的标的"""
+    from backend.db.factor import list_factor_symbols
+
+    symbols = list_factor_symbols()
+    if not symbols:
+        typer.echo("暂无因子数据")
+    else:
+        typer.echo(f"\n共 {len(symbols)} 个标的有因子数据:\n")
+        for sym in symbols:
+            typer.echo(f"  {sym}")
+
+
+@data_app.command("factor-show")
+def show_factor_cmd(
+    symbol: str = typer.Argument(..., help="标的代码"),
+    start_date: str | None = typer.Option(None, help="开始日期 YYYY-MM-DD"),
+    end_date: str | None = typer.Option(None, help="结束日期 YYYY-MM-DD"),
+):
+    """显示后复权因子数据"""
+    from backend.db.factor import query_factor
+
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d") if start_date else None
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d") if end_date else None
+
+    data = query_factor(symbol, start_dt, end_dt)
+
+    if len(data) == 0:
+        typer.echo(f"无 {symbol} 的因子数据")
+        return
+
+    typer.echo(f"\n{symbol} 后复权因子数据 (共 {len(data)} 条):\n")
+    typer.echo(data.to_string(index=False))
+
+
 # 回测子命令
 backtest_app = typer.Typer(name="backtest", help="回测管理")
 app.add_typer(backtest_app, name="backtest")
