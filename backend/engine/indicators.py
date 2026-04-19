@@ -160,23 +160,29 @@ class SymbolIndicators:
         if len(self._data) < n + m1 + m2:
             return (np.nan, np.nan, np.nan)
 
-        high_tail = self._data["high"].tail(n)
-        low_tail = self._data["low"].tail(n)
-        current_close = self._data["close"].iloc[-1]
+        # 需要足够的历史数据来累积 K/D
+        lookback = n + m1 + m2
+        data = self._data.tail(lookback)
 
-        highest_high = high_tail.max()
-        lowest_low = low_tail.min()
+        k = 50.0
+        d = 50.0
 
-        if highest_high == lowest_low:
-            rsv = 50.0
-        else:
-            rsv = 100 * (current_close - lowest_low) / (highest_high - lowest_low)
+        alpha_k = 1.0 / m1
+        alpha_d = 1.0 / m2
 
-        # 计算 K, D 值
-        k = (2 / 3) * 50.0 + (1 / 3) * rsv
-        d = (2 / 3) * 50.0 + (1 / 3) * k
+        for i in range(n - 1, len(data)):
+            window = data.iloc[max(0, i - n + 1):i + 1]
+            highest = window["high"].max()
+            lowest = window["low"].min()
 
-        # J = 3K - 2D
+            if highest == lowest:
+                rsv = 50.0
+            else:
+                rsv = 100.0 * (data["close"].iloc[i] - lowest) / (highest - lowest)
+
+            k = (1 - alpha_k) * k + alpha_k * rsv
+            d = (1 - alpha_d) * d + alpha_d * k
+
         j = 3 * k - 2 * d
 
         return (float(k), float(d), float(j))

@@ -340,6 +340,32 @@ backtest_app = typer.Typer(name="backtest", help="回测管理")
 app.add_typer(backtest_app, name="backtest")
 
 
+def _print_backtest_result(result: dict):
+    """打印回测结果"""
+    if result.get("status") == "failed":
+        typer.echo(f"\n回测失败: {result.get('error', '未知错误')}")
+        return
+
+    typer.echo("\n回测完成!")
+    typer.echo(f"总收益率: {result['metrics']['total_return']:.2%}")
+    typer.echo(f"年化收益: {result['metrics']['annual_return']:.2%}")
+    typer.echo(f"夏普比率: {result['metrics']['sharpe_ratio']:.2f}")
+    typer.echo(f"最大回撤: {result['metrics']['max_drawdown']:.2%}")
+    typer.echo(f"胜率: {result['metrics']['win_rate']:.2%}")
+    typer.echo(f"交易次数: {len(result['trades'])}")
+
+    if result["trades"]:
+        typer.echo(f"\n{'时间':<22} {'方向':<6} {'标的':<14} {'价格':>10} {'数量':>8} {'手续费':>10} {'盈亏':>10}")
+        typer.echo("-" * 85)
+        for t in result["trades"]:
+            comm = f"{t.get('commission', 0):.2f}" if t.get("commission") else "-"
+            pnl = f"{t.get('pnl', 0):.2f}" if t.get("pnl") else "-"
+            typer.echo(
+                f"{str(t['timestamp']):<22} {t['side']:<6} {t['symbol']:<14} "
+                f"{t['price']:>10.4f} {t['quantity']:>8} {comm:>10} {pnl:>10}"
+            )
+
+
 @backtest_app.command("run")
 def run_backtest_cmd(
     strategy_id: int = typer.Argument(..., help="策略 ID"),
@@ -348,8 +374,10 @@ def run_backtest_cmd(
     end_date: str = typer.Argument(..., help="结束日期 YYYY-MM-DD"),
     initial_capital: float = typer.Option(1000000.0, help="初始资金"),
     commission: float = typer.Option(0.0003, help="手续费率"),
+    period: str = typer.Option("1min", help="K线周期: 1min/5min/15min/30min/60min/120min/1D/1W/1M/1Q"),
+    adjust: str = typer.Option("hfq", help="复权方式: none/qfq/hfq"),
 ):
-    """运行回测"""
+    """运行回测（使用数据库中的策略）"""
     from decimal import Decimal
 
     from backend.db import SessionLocal, get_market_data
@@ -379,13 +407,13 @@ def run_backtest_cmd(
         # 查询数据
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-        data_dict = get_market_data(symbol, start_dt, end_dt)
+        data_dict = get_market_data(symbol, start_dt, end_dt, period=period, adjust=adjust)
 
         if not data_dict or symbol not in data_dict:
             typer.echo(f"无 {symbol} 的K线数据", err=True)
             raise typer.Exit(1)
 
-        typer.echo(f"开始回测: {symbol} ({start_date} ~ {end_date})")
+        typer.echo(f"开始回测: {symbol} ({start_date} ~ {end_date}) period={period} adjust={adjust}")
 
         # 执行回测
         engine = BacktestEngine(
@@ -407,14 +435,66 @@ def run_backtest_cmd(
         backtest.equity_curve = json.dumps(result["equity_curve"])
         db.commit()
 
-        # 输出结果
-        typer.echo("\n回测完成!")
-        typer.echo(f"总收益率: {result['metrics']['total_return']:.2%}")
-        typer.echo(f"年化收益: {result['metrics']['annual_return']:.2%}")
-        typer.echo(f"夏普比率: {result['metrics']['sharpe_ratio']:.2f}")
-        typer.echo(f"最大回撤: {result['metrics']['max_drawdown']:.2%}")
-        typer.echo(f"胜率: {result['metrics']['win_rate']:.2%}")
-        typer.echo(f"交易次数: {len(result['trades'])}")
+        _print_backtest_result(result)
+
+
+@backtest_app.command("run-file")
+def run_backtest_file_cmd(
+    strategy_file: Path = typer.Argument(..., help="策略文件路径 (.py)", exists=True),
+    symbol: str = typer.Argument(..., help="标的代码"),
+    start_date: str = typer.Argument(..., help="开始日期 YYYY-MM-DD"),
+    end_date: str = typer.Argument(..., help="结束日期 YYYY-MM-DD"),
+    initial_capital: float = typer.Option(1000000.0, help="初始资金"),
+    commission: float = typer.Option(0.0003, help="手续费率"),
+    period: str = typer.Option("1min", help="K线周期: 1min/5min/15min/30min/60min/120min/1D/1W/1M/1Q"),
+    adjust: str = typer.Option("hfq", help="复权方式: none/qfq/hfq"),
+):
+    """运行回测（直接使用策略文件，无需数据库）"""
+    from backend.db import get_market_data
+    from backend.engine import BacktestEngine
+
+    # 读取策略文件
+    if not strategy_file.suffix == ".py":
+        typer.echo("策略文件必须是 .py 文件", err=True)
+        raise typer.Exit(1)
+
+    strategy_code = strategy_file.read_text(encoding="utf-8")
+
+    # 验证策略代码
+    try:
+        from backend.engine.executor import StrategyExecutor
+        executor = StrategyExecutor(strategy_code)
+        executor.load()
+    except ValueError as e:
+        typer.echo(f"策略代码无效: {e}", err=True)
+        raise typer.Exit(1)
+
+    # 查询行情数据
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+    data_dict = get_market_data(symbol, start_dt, end_dt, period=period, adjust=adjust)
+
+    if not data_dict or symbol not in data_dict:
+        typer.echo(f"无 {symbol} 的K线数据", err=True)
+        raise typer.Exit(1)
+
+    kline_data = data_dict[symbol]
+    typer.echo(f"开始回测: {symbol} ({start_date} ~ {end_date})")
+    typer.echo(f"  策略文件: {strategy_file}")
+    typer.echo(f"  K线周期: {period}  复权: {adjust}")
+    typer.echo(f"  数据量: {len(kline_data)} bars")
+
+    # 执行回测
+    engine = BacktestEngine(
+        strategy_code=strategy_code,
+        data=kline_data,
+        symbol=symbol,
+        initial_capital=initial_capital,
+        commission=commission,
+    )
+    result = engine.run()
+
+    _print_backtest_result(result)
 
 
 @backtest_app.command("list")
