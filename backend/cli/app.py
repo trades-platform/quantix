@@ -340,6 +340,22 @@ backtest_app = typer.Typer(name="backtest", help="回测管理")
 app.add_typer(backtest_app, name="backtest")
 
 
+def _display_width(s: str) -> int:
+    """计算字符串的显示宽度（CJK 字符占 2，其余占 1）"""
+    import unicodedata
+    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
+
+
+def _pad_right(s: str, width: int) -> str:
+    """按显示宽度右填充空格"""
+    return s + " " * (width - _display_width(s))
+
+
+def _pad_left(s: str, width: int) -> str:
+    """按显示宽度左填充空格"""
+    return " " * (width - _display_width(s)) + s
+
+
 def _print_backtest_result(result: dict):
     """打印回测结果"""
     if result.get("status") == "failed":
@@ -355,15 +371,38 @@ def _print_backtest_result(result: dict):
     typer.echo(f"交易次数: {len(result['trades'])}")
 
     if result["trades"]:
-        typer.echo(f"\n{'时间':<22} {'方向':<6} {'标的':<14} {'价格':>10} {'数量':>8} {'手续费':>10} {'盈亏':>10}")
-        typer.echo("-" * 85)
+        # 列宽定义（显示宽度）
+        col = {
+            "time": 22, "side": 6, "symbol": 14,
+            "price": 10, "qty": 8, "comm": 10, "pnl": 14,
+        }
+        sep = "-" * sum(col.values())
+
+        header = (
+            _pad_right("时间", col["time"])
+            + _pad_right("方向", col["side"])
+            + _pad_right("标的", col["symbol"])
+            + _pad_left("价格", col["price"])
+            + _pad_left("数量", col["qty"])
+            + _pad_left("手续费", col["comm"])
+            + _pad_left("盈亏", col["pnl"])
+        )
+        typer.echo(f"\n{header}")
+        typer.echo(sep)
+
         for t in result["trades"]:
             comm = f"{t.get('commission', 0):.2f}" if t.get("commission") else "-"
             pnl = f"{t.get('pnl', 0):.2f}" if t.get("pnl") else "-"
-            typer.echo(
-                f"{str(t['timestamp']):<22} {t['side']:<6} {t['symbol']:<14} "
-                f"{t['price']:>10.4f} {t['quantity']:>8} {comm:>10} {pnl:>10}"
+            line = (
+                _pad_right(str(t["timestamp"]), col["time"])
+                + _pad_right(t["side"], col["side"])
+                + _pad_right(t["symbol"], col["symbol"])
+                + _pad_left(f"{t['price']:.4f}", col["price"])
+                + _pad_left(str(t["quantity"]), col["qty"])
+                + _pad_left(comm, col["comm"])
+                + _pad_left(pnl, col["pnl"])
             )
+            typer.echo(line)
 
 
 @backtest_app.command("run")
