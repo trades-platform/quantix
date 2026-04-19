@@ -340,24 +340,10 @@ backtest_app = typer.Typer(name="backtest", help="回测管理")
 app.add_typer(backtest_app, name="backtest")
 
 
-def _display_width(s: str) -> int:
-    """计算字符串的显示宽度（CJK 字符占 2，其余占 1）"""
-    import unicodedata
-    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
-
-
-def _pad_right(s: str, width: int) -> str:
-    """按显示宽度右填充空格"""
-    return s + " " * (width - _display_width(s))
-
-
-def _pad_left(s: str, width: int) -> str:
-    """按显示宽度左填充空格"""
-    return " " * (width - _display_width(s)) + s
-
-
 def _print_backtest_result(result: dict):
     """打印回测结果"""
+    from prettytable import PrettyTable
+
     if result.get("status") == "failed":
         typer.echo(f"\n回测失败: {result.get('error', '未知错误')}")
         return
@@ -371,38 +357,29 @@ def _print_backtest_result(result: dict):
     typer.echo(f"交易次数: {len(result['trades'])}")
 
     if result["trades"]:
-        # 列宽定义（显示宽度）
-        col = {
-            "time": 22, "side": 6, "symbol": 14,
-            "price": 10, "qty": 8, "comm": 10, "pnl": 14,
-        }
-        sep = "-" * sum(col.values())
-
-        header = (
-            _pad_right("时间", col["time"])
-            + _pad_right("方向", col["side"])
-            + _pad_right("标的", col["symbol"])
-            + _pad_left("价格", col["price"])
-            + _pad_left("数量", col["qty"])
-            + _pad_left("手续费", col["comm"])
-            + _pad_left("盈亏", col["pnl"])
-        )
-        typer.echo(f"\n{header}")
-        typer.echo(sep)
+        table = PrettyTable()
+        table.field_names = ["时间", "方向", "标的", "价格", "数量", "手续费", "盈亏"]
+        table.align["时间"] = "l"
+        table.align["方向"] = "l"
+        table.align["标的"] = "l"
+        table.align["价格"] = "r"
+        table.align["数量"] = "r"
+        table.align["手续费"] = "r"
+        table.align["盈亏"] = "r"
+        table.float_format = ".4"
 
         for t in result["trades"]:
-            comm = f"{t.get('commission', 0):.2f}" if t.get("commission") else "-"
-            pnl = f"{t.get('pnl', 0):.2f}" if t.get("pnl") else "-"
-            line = (
-                _pad_right(str(t["timestamp"]), col["time"])
-                + _pad_right(t["side"], col["side"])
-                + _pad_right(t["symbol"], col["symbol"])
-                + _pad_left(f"{t['price']:.4f}", col["price"])
-                + _pad_left(str(t["quantity"]), col["qty"])
-                + _pad_left(comm, col["comm"])
-                + _pad_left(pnl, col["pnl"])
-            )
-            typer.echo(line)
+            table.add_row([
+                str(t["timestamp"]),
+                t["side"],
+                t["symbol"],
+                t["price"],
+                t["quantity"],
+                f"{t.get('commission', 0):.2f}" if t.get("commission") else "-",
+                f"{t.get('pnl', 0):.2f}" if t.get("pnl") else "-",
+            ])
+
+        typer.echo(f"\n{table}")
 
 
 @backtest_app.command("run")
