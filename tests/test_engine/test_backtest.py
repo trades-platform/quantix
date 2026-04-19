@@ -355,3 +355,88 @@ def handle_bar(context):
 
     assert result["status"] == "completed"
     assert len(result["equity_curve"]) == 2  # 初始值 + 一根K线
+
+
+def test_sell_pnl_uses_correct_avg_cost(sample_kline_data):
+    """清仓卖出时 PnL 应使用正确的 avg_cost，而非 0.0
+
+    回归测试：卖出清仓时先 del _avg_cost 再取 avg_cost 导致 PnL 恒正的 bug。
+    """
+    strategy_code = """
+def initialize(context):
+    context.bought = False
+
+def handle_bar(context):
+    if not context.bought:
+        context.bought = True
+        return [{"symbol": context.symbol, "quantity": 100}]
+    elif context.bar_index == 2:
+        return [{"symbol": context.symbol, "quantity": -100}]
+    return []
+""".strip()
+
+    # 用下跌数据构造亏损场景：买入价高于卖出价
+    falling_data = pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=3, freq="D"),
+        "open": [10.0, 9.5, 9.0],
+        "high": [10.5, 9.8, 9.2],
+        "low": [9.8, 9.0, 8.8],
+        "close": [10.2, 9.2, 8.5],
+        "volume": [1000000, 1000000, 1000000],
+    })
+
+    engine = BacktestEngine(
+        strategy_code=strategy_code,
+        data=falling_data,
+        symbol="600000.SH",
+        initial_capital=1000000,
+    )
+
+    result = engine.run()
+    trades = result["trades"]
+    assert len(trades) == 2
+
+    sell_trade = trades[1]
+    assert sell_trade["side"] == "sell"
+    # 买入价 10.2（bar 0 close），卖出价 9.2（bar 1 close），应该亏损
+    assert sell_trade["pnl"] < 0
+    # PnL = (9.2 - 10.2) * 100 = -100
+    assert abs(sell_trade["pnl"] - (-100.0)) < 1e-10
+
+
+def test_strategy_params_injection(sample_kline_data):
+    """策略参数应通过 context.params 注入"""
+    strategy_code = """
+def initialize(context):
+    context.my_period = context.params.get("period", 10)
+    context.my_name = context.params.get("name", "default")
+
+def handle_bar(context):
+    # 用 set_attr 记录参数值以便测试验证
+    context.set_attr("period", context.my_period)
+    context.set_attr("name", context.my_name)
+    if context.bar_index == 1:
+        context.buy(context.symbol, 100)
+    return []
+""".strip()
+
+    engine = BacktestEngine(
+        strategy_code=strategy_code,
+        data=sample_kline_data,
+        symbol="600000.SH",
+        initial_capital=1000000,
+        params={"period": 20, "name": "test_strategy"},
+    )
+
+    result = engine.run()
+    assert result["status"] == "completed"
+
+    # 无 params 时不应报错
+    engine_default = BacktestEngine(
+        strategy_code=strategy_code,
+        data=sample_kline_data,
+        symbol="600000.SH",
+        initial_capital=1000000,
+    )
+    result_default = engine_default.run()
+    assert result_default["status"] == "completed"

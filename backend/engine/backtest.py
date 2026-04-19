@@ -56,19 +56,18 @@ class Portfolio:
             if self.positions.get(symbol, 0) < quantity:
                 return False  # 持仓不足
 
+            # 计算盈亏（必须在更新持仓之前取 avg_cost）
+            avg_cost = self._avg_cost.get(symbol, 0.0)
+            pnl = (price - avg_cost) * quantity
+
             commission_cost = price * quantity * self.commission
             proceeds = price * quantity * (1 - self.commission)
             self.cash += proceeds
             self.positions[symbol] = self.positions.get(symbol, 0) - quantity
             if self.positions[symbol] == 0:
                 del self.positions[symbol]
-                # 如果清仓，删除平均成本
                 if symbol in self._avg_cost:
                     del self._avg_cost[symbol]
-
-            # 计算盈亏
-            avg_cost = self._avg_cost.get(symbol, 0.0)
-            pnl = (price - avg_cost) * quantity
 
             self.trades.append({
                 "symbol": symbol,
@@ -99,6 +98,7 @@ class BacktestEngine:
         initial_capital: float = 1000000.0,
         commission: float = 0.0003,
         period: str = "1min",
+        params: dict | None = None,
     ):
         self.strategy_code = strategy_code
         # 向后兼容：如果传入单个字符串，包装成列表
@@ -117,6 +117,7 @@ class BacktestEngine:
         self.initial_capital = initial_capital
         self.commission = commission
         self.period = period
+        self.params = params or {}
 
     def run(self) -> dict:
         """运行回测
@@ -153,6 +154,7 @@ class BacktestEngine:
             initial_capital=self.initial_capital,
             commission=self.commission,
             symbols=self.symbols,
+            params=self.params,
         )
 
         # 创建投资组合

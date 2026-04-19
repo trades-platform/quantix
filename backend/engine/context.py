@@ -39,6 +39,7 @@ class Context:
     orders: list = field(default_factory=list)
     attributes: dict[str, Any] = field(default_factory=dict)
     indicators_map: dict = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         self.cash = self.initial_capital

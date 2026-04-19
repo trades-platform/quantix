@@ -1,13 +1,14 @@
-"""双均线交叉策略示例
+"""双均线交叉策略
 
 用法:
   quantix backtest run-file strategies/dual_ma.py 588000.SH 2025-01-01 2026-04-18 --period 1D --adjust hfq
+  quantix backtest run-file strategies/dual_ma.py 588000.SH 2025-01-01 2026-04-18 --period 1D --adjust hfq --params '{"short_period":10,"long_period":30}'
 """
 
 
 def initialize(context):
-    context.short_period = 5
-    context.long_period = 20
+    context.short_period = context.params.get("short_period", 5)
+    context.long_period = context.params.get("long_period", 20)
     context.bought = False
 
 

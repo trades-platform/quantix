@@ -464,6 +464,7 @@ def run_backtest_file_cmd(
     commission: float = typer.Option(0.0003, help="手续费率"),
     period: str = typer.Option("1min", help="K线周期: 1min/5min/15min/30min/60min/120min/1D/1W/1M/1Q"),
     adjust: str = typer.Option("hfq", help="复权方式: none/qfq/hfq"),
+    params: str = typer.Option("{}", help="策略参数 (JSON), 如 '{\"short_period\":10,\"long_period\":30}'"),
 ):
     """运行回测（直接使用策略文件，无需数据库）"""
     from backend.db import get_market_data
@@ -494,10 +495,19 @@ def run_backtest_file_cmd(
         typer.echo(f"无 {symbol} 的K线数据", err=True)
         raise typer.Exit(1)
 
+    # 解析策略参数
+    try:
+        strategy_params = json.loads(params)
+    except json.JSONDecodeError as e:
+        typer.echo(f"策略参数 JSON 解析失败: {e}", err=True)
+        raise typer.Exit(1)
+
     kline_data = data_dict[symbol]
     typer.echo(f"开始回测: {symbol} ({start_date} ~ {end_date})")
     typer.echo(f"  策略文件: {strategy_file}")
     typer.echo(f"  K线周期: {period}  复权: {adjust}")
+    if strategy_params:
+        typer.echo(f"  策略参数: {strategy_params}")
     typer.echo(f"  数据量: {len(kline_data)} bars")
 
     # 执行回测
@@ -507,6 +517,7 @@ def run_backtest_file_cmd(
         symbol=symbol,
         initial_capital=initial_capital,
         commission=commission,
+        params=strategy_params,
     )
     result = engine.run()
 
