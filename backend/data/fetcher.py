@@ -12,7 +12,7 @@ from backend.data.config import get_tgw_credentials
 from backend.data.pandas_compat import patch_fillna, restore_fillna
 from backend.db import import_kline as db_import_kline
 from backend.db import import_factor as db_import_factor
-from backend.db import query_kline as db_query_kline
+from backend.db.kline import _query_kline as db_query_kline
 
 logger = logging.getLogger(__name__)
 

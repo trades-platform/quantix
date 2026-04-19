@@ -47,5 +47,7 @@ class Trade(Base):
     price = Column(Numeric(15, 2), nullable=False)
     quantity = Column(Integer, nullable=False)
     timestamp = Column(DateTime, nullable=False)
+    commission = Column(Numeric(15, 4), nullable=True)
+    pnl = Column(Numeric(15, 4), nullable=True)
 
     backtest = relationship("Backtest", back_populates="trades")

@@ -139,8 +139,8 @@ const returnDistributionOption = computed(() => {
     return {}
   }
 
-  const profitable = trades.value.filter((t) => t.profit && t.profit > 0).length
-  const loss = trades.value.filter((t) => t.profit && t.profit < 0).length
+  const profitable = trades.value.filter((t) => t.pnl && t.pnl > 0).length
+  const loss = trades.value.filter((t) => t.pnl && t.pnl < 0).length
 
   return {
     title: {
@@ -402,12 +402,13 @@ onMounted(() => {
                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">方向</th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">价格</th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">数量</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">手续费</th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">盈亏</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 bg-white">
               <tr v-if="trades.length === 0">
-                <td colspan="7" class="px-6 py-8 text-center text-gray-500">暂无交易记录</td>
+                <td colspan="8" class="px-6 py-8 text-center text-gray-500">暂无交易记录</td>
               </tr>
               <tr v-else v-for="(trade, index) in trades" :key="trade.id" class="hover:bg-gray-50 transition-colors">
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
@@ -433,8 +434,11 @@ onMounted(() => {
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                   {{ trade.quantity }}
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium" :class="trade.profit >= 0 ? 'text-red-600' : 'text-green-600'">
-                  {{ trade.profit !== undefined && trade.profit !== null ? formatCurrency(trade.profit) : '-' }}
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  {{ trade.commission != null ? formatCurrency(trade.commission) : '-' }}
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium" :class="trade.pnl > 0 ? 'text-red-600' : trade.pnl < 0 ? 'text-green-600' : 'text-gray-400'">
+                  {{ trade.pnl != null ? formatCurrency(trade.pnl) : '-' }}
                 </td>
               </tr>
             </tbody>

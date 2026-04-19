@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, status
 from pydantic import BaseModel
 import pandas as pd
 
-from backend.db import SessionLocal, import_kline, list_symbols, query_kline
+from backend.db import SessionLocal, import_kline, list_symbols, get_market_data
 from backend.models import Symbol
 
 router = APIRouter(prefix="/data", tags=["data"])
@@ -75,7 +75,8 @@ def get_kline_data(symbol: str, start_date: str | None = None, end_date: str | N
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid date format: {e}")
 
-    data = query_kline(symbol, start_dt, end_dt)
+    data_dict = get_market_data(symbol, start_dt, end_dt)
+    data = data_dict.get(symbol, pd.DataFrame())
 
     # 限制返回条数（取最近的 N 条）
     if limit and limit > 0 and len(data) > limit:
@@ -95,6 +96,54 @@ def get_kline_data(symbol: str, start_date: str | None = None, end_date: str | N
         })
 
     return {"symbol": symbol, "data": result}
+
+
+class MarketDataRequest(BaseModel):
+    symbols: list[str]
+    start_date: str | None = None
+    end_date: str | None = None
+    period: str = "1min"
+    adjust: str = "none"
+
+
+@router.post("/market-data")
+def get_market_data_api(req: MarketDataRequest):
+    """统一行情数据接口
+
+    支持多标的、复权、不同K线周期。
+    """
+    try:
+        start_dt = datetime.strptime(req.start_date, "%Y-%m-%d") if req.start_date else None
+        end_dt = datetime.strptime(req.end_date, "%Y-%m-%d") if req.end_date else None
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid date format: {e}")
+
+    valid_periods = ("1min", "5min", "15min", "30min", "60min", "120min", "1D", "1W", "1M", "1Q")
+    if req.period not in valid_periods:
+        raise HTTPException(status_code=400, detail=f"Invalid period, supported: {valid_periods}")
+
+    valid_adjust = ("none", "hfq", "qfq")
+    if req.adjust not in valid_adjust:
+        raise HTTPException(status_code=400, detail=f"Invalid adjust, supported: {valid_adjust}")
+
+    data_dict = get_market_data(req.symbols, start_dt, end_dt, req.period, req.adjust)
+
+    result = {}
+    for symbol, df in data_dict.items():
+        rows = []
+        for _, row in df.iterrows():
+            rows.append({
+                "timestamp": row["timestamp"].isoformat(),
+                "open": float(row["open"]),
+                "high": float(row["high"]),
+                "low": float(row["low"]),
+                "close": float(row["close"]),
+                "volume": int(row["volume"]),
+                "amount": float(row.get("amount", 0)),
+            })
+        result[symbol] = rows
+
+    return {"data": result}
 
 
 @router.post("/kline/import", status_code=status.HTTP_201_CREATED)

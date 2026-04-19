@@ -2,6 +2,7 @@
 
 import json
 from datetime import datetime
+import pandas as pd
 from decimal import Decimal
 from typing import List
 
@@ -9,7 +10,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
-from backend.db import SessionLocal, query_kline
+from backend.db import SessionLocal, get_market_data
 from backend.engine import BacktestEngine
 from backend.models import Backtest, Strategy, Trade
 
@@ -23,6 +24,8 @@ class BacktestCreate(BaseModel):
     end_date: str = Field(..., description="格式: YYYY-MM-DD")
     initial_capital: float = Field(default=1000000.0, ge=0)
     commission: float = Field(default=0.0003, ge=0, le=1)
+    period: str = Field(default="1min", description="K线周期: 1min, 5min, 15min, 30min, 60min, 120min, 1D, 1W, 1M, 1Q")
+    adjust: str = Field(default="hfq", description="复权方式: none, hfq(后复权), qfq(前复权)")
 
     @field_validator("start_date", "end_date")
     @classmethod
@@ -78,6 +81,8 @@ class TradeResponse(BaseModel):
     price: float
     quantity: int
     timestamp: datetime
+    commission: float | None = None
+    pnl: float | None = None
 
 
 @router.post("", response_model=BacktestResponse, status_code=status.HTTP_201_CREATED)
@@ -103,10 +108,18 @@ def create_backtest(req: BacktestCreate):
         db.commit()
         db.refresh(backtest)
 
-        # 查询K线数据
+        # 查询行情数据（含复权 + 重采样）
         start_dt = datetime.strptime(req.start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(req.end_date, "%Y-%m-%d")
-        kline_data = query_kline(req.symbol, start_dt, end_dt)
+        data_dict = get_market_data(
+            symbols=req.symbol,
+            start_date=start_dt,
+            end_date=end_dt,
+            period=req.period,
+            adjust=req.adjust,
+        )
+
+        kline_data = data_dict.get(req.symbol, pd.DataFrame())
 
         if len(kline_data) == 0:
             backtest.status = "failed"
@@ -142,6 +155,8 @@ def create_backtest(req: BacktestCreate):
                 price=Decimal(str(trade["price"])),
                 quantity=trade["quantity"],
                 timestamp=datetime.fromisoformat(trade["timestamp"]) if isinstance(trade["timestamp"], str) else datetime.utcnow(),
+                commission=Decimal(str(trade.get("commission", 0))) if trade.get("commission") is not None else None,
+                pnl=Decimal(str(trade.get("pnl", 0))) if trade.get("pnl") is not None else None,
             )
             db.add(db_trade)
         db.commit()
@@ -178,6 +193,8 @@ def get_backtest_trades(backtest_id: int):
                 price=float(t.price),
                 quantity=t.quantity,
                 timestamp=t.timestamp,
+                commission=float(t.commission) if t.commission else None,
+                pnl=float(t.pnl) if t.pnl else None,
             )
             for t in trades
         ]

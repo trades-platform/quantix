@@ -99,12 +99,12 @@ def show_kline_cmd(
     limit: int = typer.Option(10, help="显示行数"),
 ):
     """显示K线数据"""
-    from backend.db import query_kline
+    from backend.db.kline import _query_kline
 
     start_dt = datetime.strptime(start_date, "%Y-%m-%d") if start_date else None
     end_dt = datetime.strptime(end_date, "%Y-%m-%d") if end_date else None
 
-    data = query_kline(symbol, start_dt, end_dt)
+    data = _query_kline(symbol, start_dt, end_dt)
 
     if len(data) == 0:
         typer.echo(f"无 {symbol} 的数据")
@@ -320,12 +320,12 @@ def show_factor_cmd(
     end_date: str | None = typer.Option(None, help="结束日期 YYYY-MM-DD"),
 ):
     """显示后复权因子数据"""
-    from backend.db.factor import query_factor
+    from backend.db.factor import _query_factor
 
     start_dt = datetime.strptime(start_date, "%Y-%m-%d") if start_date else None
     end_dt = datetime.strptime(end_date, "%Y-%m-%d") if end_date else None
 
-    data = query_factor(symbol, start_dt, end_dt)
+    data = _query_factor(symbol, start_dt, end_dt)
 
     if len(data) == 0:
         typer.echo(f"无 {symbol} 的因子数据")
@@ -352,7 +352,7 @@ def run_backtest_cmd(
     """运行回测"""
     from decimal import Decimal
 
-    from backend.db import SessionLocal, query_kline
+    from backend.db import SessionLocal, get_market_data
     from backend.engine import BacktestEngine
     from backend.models import Backtest, Strategy
 
@@ -379,9 +379,9 @@ def run_backtest_cmd(
         # 查询数据
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-        kline_data = query_kline(symbol, start_dt, end_dt)
+        data_dict = get_market_data(symbol, start_dt, end_dt)
 
-        if len(kline_data) == 0:
+        if not data_dict or symbol not in data_dict:
             typer.echo(f"无 {symbol} 的K线数据", err=True)
             raise typer.Exit(1)
 
@@ -390,7 +390,7 @@ def run_backtest_cmd(
         # 执行回测
         engine = BacktestEngine(
             strategy_code=strategy.code,
-            data=kline_data,
+            data=data_dict[symbol],
             symbol=symbol,
             initial_capital=initial_capital,
             commission=commission,

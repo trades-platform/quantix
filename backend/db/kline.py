@@ -107,7 +107,7 @@ def import_kline(symbol: str, data: pd.DataFrame) -> int:
     return len(new_data)
 
 
-def query_kline(
+def _query_kline(
     symbol: str,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
@@ -130,20 +130,13 @@ def query_kline(
 
     table = db.open_table(table_name)
 
-    # 构建过滤条件
-    filters = []
+    # 查询全量数据后在 pandas 侧过滤（LanceDB timestamp filter 兼容性差）
+    data = table.to_pandas()
+
     if start_date:
-        filters.append(f"timestamp >= '{start_date.isoformat()}'")
+        data = data[data["timestamp"] >= pd.Timestamp(start_date)]
     if end_date:
-        filters.append(f"timestamp <= '{end_date.isoformat()}'")
-
-    filter_str = " AND ".join(filters) if filters else None
-
-    # 查询数据
-    if filter_str:
-        data = table.to_pandas(filter=filter_str)
-    else:
-        data = table.to_pandas()
+        data = data[data["timestamp"] <= pd.Timestamp(end_date)]
 
     return data.sort_values("timestamp").reset_index(drop=True)
 
@@ -172,3 +165,82 @@ def list_symbols() -> list[str]:
             symbols.append(symbol)
 
     return sorted(symbols)
+
+
+def _query_kline_batch(
+    symbols: list[str],
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+) -> dict[str, pd.DataFrame]:
+    """批量查询多个标的的 K 线数据
+
+    Args:
+        symbols: 标的代码列表
+        start_date: 开始日期（包含）
+        end_date: 结束日期（包含）
+
+    Returns:
+        {symbol: DataFrame} 字典，跳过无数据的标的
+    """
+    result = {}
+    for symbol in symbols:
+        df = _query_kline(symbol, start_date, end_date)
+        if not df.empty:
+            result[symbol] = df
+    return result
+
+
+def get_market_data(
+    symbols: str | list[str],
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    period: str = "1min",
+    adjust: str = "none",
+) -> dict[str, pd.DataFrame]:
+    """统一行情数据获取接口
+
+    从 LanceDB 获取 K 线数据，可选复权和重采样。
+
+    数据处理流水线：原始 1min → 复权(adjust≠none) → 重采样(period≠1min)
+
+    Args:
+        symbols: 单个标的代码或标的列表
+        start_date: 开始日期（包含）
+        end_date: 结束日期（包含）
+        period: K 线周期，支持 "1min", "5min", "15min", "30min", "60min", "1D"
+        adjust: 复权方式，"none" 不复权，"hfq" 后复权，"qfq" 前复权
+
+    Returns:
+        {symbol: DataFrame} 字典
+    """
+    from backend.db.factor import _query_factor
+    from backend.engine.adjust import apply_factor
+    from backend.engine.resample import resample_kline
+
+    if isinstance(symbols, str):
+        symbols = [symbols]
+
+    valid_adjust = ("none", "hfq", "qfq")
+    if adjust not in valid_adjust:
+        raise ValueError(f"Invalid adjust: {adjust}, expected one of {valid_adjust}")
+
+    data_dict = _query_kline_batch(symbols, start_date, end_date)
+
+    for symbol, df in data_dict.items():
+        if df.empty:
+            continue
+
+        # 复权
+        if adjust != "none":
+            factor_df = _query_factor(symbol)
+            if not factor_df.empty:
+                df = apply_factor(df, factor_df, mode=adjust)
+                for col in ["open", "high", "low", "close"]:
+                    df[col] = df[f"adjusted_{col}"]
+                data_dict[symbol] = df
+
+        # 重采样
+        if period != "1min":
+            data_dict[symbol] = resample_kline(data_dict[symbol], period)
+
+    return data_dict

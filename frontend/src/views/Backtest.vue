@@ -22,6 +22,8 @@ const form = ref({
   end_date: '',
   initial_capital: 1000000,
   commission: 0.0003,
+  period: '1min',
+  adjust: 'hfq',
 })
 
 const formErrors = ref({
@@ -343,6 +345,48 @@ onMounted(() => {
               </div>
             </div>
 
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">
+                K线周期
+              </label>
+              <div class="flex space-x-2">
+                <button
+                  v-for="p in ['1min', '5min', '15min', '30min', '60min', '120min', '1D', '1W', '1M', '1Q']"
+                  :key="p"
+                  type="button"
+                  @click="form.period = p"
+                  class="text-sm px-3 py-1.5 border rounded-lg hover:bg-gray-50 transition-colors"
+                  :class="{ 'bg-blue-50 border-blue-500 text-blue-700': form.period === p }"
+                >
+                  {{ { '1D': '日线', '1W': '周线', '1M': '月线', '1Q': '季线', '120min': '2h' }[p] || p }}
+                </button>
+              </div>
+              <p class="text-xs text-gray-500 mt-1">
+                从1分钟数据合成，日线适合中长期策略
+              </p>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">
+                复权方式
+              </label>
+              <div class="flex space-x-2">
+                <button
+                  v-for="opt in [{value:'none',label:'不复权'}, {value:'qfq',label:'前复权'}, {value:'hfq',label:'后复权'}]"
+                  :key="opt.value"
+                  type="button"
+                  @click="form.adjust = opt.value"
+                  class="text-sm px-3 py-1.5 border rounded-lg hover:bg-gray-50 transition-colors"
+                  :class="{ 'bg-blue-50 border-blue-500 text-blue-700': form.adjust === opt.value }"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
+              <p class="text-xs text-gray-500 mt-1">
+                后复权保持历史价格连续，前复权保持最新价不变
+              </p>
+            </div>
+
             <div class="flex justify-end pt-4 border-t">
               <button
                 type="submit"
@@ -385,6 +429,14 @@ onMounted(() => {
             <div class="flex justify-between">
               <span class="text-gray-600">手续费率:</span>
               <span class="font-medium">{{ formatPercent(form.commission) }}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">K线周期:</span>
+              <span class="font-medium">{{ { '1D': '日线', '1W': '周线', '1M': '月线', '1Q': '季线', '120min': '2h' }[form.period] || form.period }}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">复权:</span>
+              <span class="font-medium">{{ {none: '不复权', qfq: '前复权', hfq: '后复权'}[form.adjust] }}</span>
             </div>
           </div>
         </div>

@@ -90,7 +90,7 @@ def import_factor(symbol: str, data: pd.DataFrame) -> int:
     return 0
 
 
-def query_factor(
+def _query_factor(
     symbol: str,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
@@ -115,16 +115,16 @@ def query_factor(
 
     table = db.open_table(FACTOR_TABLE)
 
-    filters = [f"symbol = '{symbol}'"]
-    if start_date:
-        filters.append(f"timestamp >= '{start_date.isoformat()}'")
-    if end_date:
-        filters.append(f"timestamp <= '{end_date.isoformat()}'")
+    # LanceDB timestamp filter 兼容性差，改为 pandas 侧过滤
+    data = table.to_pandas()
+    data = data[data["symbol"] == symbol]
 
-    filter_str = " AND ".join(filters)
-    data = table.search().where(filter_str).to_pandas()
-    if "symbol" in data.columns:
-        data = data[["symbol", "timestamp", "factor"]]
+    if start_date:
+        data = data[data["timestamp"] >= pd.Timestamp(start_date)]
+    if end_date:
+        data = data[data["timestamp"] <= pd.Timestamp(end_date)]
+
+    data = data[["symbol", "timestamp", "factor"]]
 
     return data.sort_values("timestamp").reset_index(drop=True)
 
