@@ -10,7 +10,6 @@
 
 def initialize(context):
     context.ma_period = context.params.get("period", 20)
-    context.bought = False
 
 
 def handle_bar(context):
@@ -22,18 +21,17 @@ def handle_bar(context):
     if ma == 0.0:
         return
 
-    price = context.current_price(context.symbol)
+    sym = context.symbol
+    price = context.current_price(sym)
     if price <= 0:
         return
 
-    pos = context.get_position(context.symbol)
+    pos = context.get_position(sym)
 
-    if not context.bought and price > ma:
+    if pos == 0 and price > ma:
         qty = int(context.cash * 0.9 / price / 100) * 100
         if qty > 0:
-            context.buy(context.symbol, qty)
-            context.bought = True
+            context.buy(sym, qty)
 
-    elif context.bought and price < ma and pos > 0:
-        context.sell(context.symbol, pos)
-        context.bought = False
+    elif pos > 0 and price < ma:
+        context.sell(sym, pos)

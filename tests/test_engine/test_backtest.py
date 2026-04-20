@@ -357,32 +357,31 @@ def handle_bar(context):
     assert len(result["equity_curve"]) == 2  # 初始值 + 一根K线
 
 
-def test_sell_pnl_uses_correct_avg_cost(sample_kline_data):
-    """清仓卖出时 PnL 应使用正确的 avg_cost，而非 0.0
+def test_sell_pnl_uses_correct_avg_cost():
+    """清仓卖出时 PnL 应使用正确的 avg_cost，并扣除佣金和滑点
 
-    回归测试：卖出清仓时先 del _avg_cost 再取 avg_cost 导致 PnL 恒正的 bug。
+    信号在 bar N 生成，订单在 bar N+1 开盘价执行（含滑点）。
     """
     strategy_code = """
 def initialize(context):
-    context.bought = False
+    pass
 
 def handle_bar(context):
-    if not context.bought:
-        context.bought = True
+    if context.bar_index == 1:
         return [{"symbol": context.symbol, "quantity": 100}]
-    elif context.bar_index == 2:
+    elif context.bar_index == 2 and context.get_position(context.symbol) > 0:
         return [{"symbol": context.symbol, "quantity": -100}]
     return []
 """.strip()
 
     # 用下跌数据构造亏损场景：买入价高于卖出价
     falling_data = pd.DataFrame({
-        "timestamp": pd.date_range("2024-01-01", periods=3, freq="D"),
-        "open": [10.0, 9.5, 9.0],
-        "high": [10.5, 9.8, 9.2],
-        "low": [9.8, 9.0, 8.8],
-        "close": [10.2, 9.2, 8.5],
-        "volume": [1000000, 1000000, 1000000],
+        "timestamp": pd.date_range("2024-01-01", periods=4, freq="D"),
+        "open": [10.0, 9.5, 9.0, 8.5],
+        "high": [10.5, 9.8, 9.2, 8.8],
+        "low": [9.8, 9.0, 8.8, 8.3],
+        "close": [10.2, 9.2, 8.5, 8.0],
+        "volume": [1000000, 1000000, 1000000, 1000000],
     })
 
     engine = BacktestEngine(
@@ -390,6 +389,7 @@ def handle_bar(context):
         data=falling_data,
         symbol="600000.SH",
         initial_capital=1000000,
+        slippage=0.0,  # 关闭滑点以简化断言
     )
 
     result = engine.run()
@@ -398,10 +398,14 @@ def handle_bar(context):
 
     sell_trade = trades[1]
     assert sell_trade["side"] == "sell"
-    # 买入价 10.2（bar 0 close），卖出价 9.2（bar 1 close），应该亏损
+    # 信号 bar 1 收盘生成买入，bar 2 开盘执行：买入价 = open[1] = 9.5
+    # 信号 bar 2 收盘生成卖出，bar 3 开盘执行：卖出价 = open[2] = 9.0
+    # PnL = (9.0 - 9.5) * 100 - sell_commission
+    # sell_commission = 9.0 * 100 * 0.0003 = 0.027
+    # net PnL = -50 - 0.027 = -50.027
     assert sell_trade["pnl"] < 0
-    # PnL = (9.2 - 10.2) * 100 = -100
-    assert abs(sell_trade["pnl"] - (-100.0)) < 1e-10
+    expected_pnl = (9.0 - 9.5) * 100 - 9.0 * 100 * 0.0003
+    assert abs(sell_trade["pnl"] - expected_pnl) < 1e-6
 
 
 def test_strategy_params_injection(sample_kline_data):

@@ -3,6 +3,26 @@
 import pandas as pd
 
 from backend.engine.context import Bar, Context
+
+
+# K线周期 → 每年 bar 数量（A股：252 交易日，每天 4 小时 = 240 分钟）
+_BARS_PER_YEAR: dict[str, int] = {
+    "1min": 252 * 240,
+    "5min": 252 * 48,
+    "15min": 252 * 16,
+    "30min": 252 * 8,
+    "60min": 252 * 4,
+    "120min": 252 * 2,
+    "1D": 252,
+    "1W": 52,
+    "1M": 12,
+    "1Q": 4,
+}
+
+
+def _bars_per_year(period: str) -> int:
+    """根据 K 线周期返回每年的 bar 数量"""
+    return _BARS_PER_YEAR.get(period, 252)
 from backend.engine.executor import StrategyExecutor
 from backend.engine.metrics import calculate_metrics
 
@@ -10,9 +30,10 @@ from backend.engine.metrics import calculate_metrics
 class Portfolio:
     """投资组合，管理资金和持仓"""
 
-    def __init__(self, initial_capital: float, commission: float):
+    def __init__(self, initial_capital: float, commission: float, slippage: float = 0.001):
         self.initial_capital = initial_capital
         self.commission = commission
+        self.slippage = slippage
         self.cash = initial_capital
         self.positions: dict[str, int] = {}
         self.trades = []
@@ -20,16 +41,26 @@ class Portfolio:
         self._avg_cost: dict[str, float] = {}  # 持仓平均成本
 
     def execute_order(self, order: dict, price: float) -> bool:
-        """执行订单"""
+        """执行订单，含滑点
+
+        Args:
+            order: 订单字典，包含 symbol, quantity, timestamp
+            price: 基础执行价格（开盘价），滑点在此基础上调整
+
+        Returns:
+            是否执行成功
+        """
         symbol = order["symbol"]
         quantity = order["quantity"]
 
         if quantity > 0:  # 买入
-            required = price * quantity * (1 + self.commission)
+            # 滑点：买入价上浮
+            exec_price = price * (1 + self.slippage)
+            required = exec_price * quantity * (1 + self.commission)
             if required > self.cash:
                 return False  # 资金不足
 
-            commission_cost = price * quantity * self.commission
+            commission_cost = exec_price * quantity * self.commission
             self.cash -= required
             self.positions[symbol] = self.positions.get(symbol, 0) + quantity
 
@@ -38,30 +69,33 @@ class Portfolio:
             current_qty = self.positions[symbol] - quantity
             new_qty = quantity
             if current_qty > 0:
-                self._avg_cost[symbol] = (current_cost * current_qty + price * new_qty) / (current_qty + new_qty)
+                self._avg_cost[symbol] = (current_cost * current_qty + exec_price * new_qty) / (current_qty + new_qty)
             else:
-                self._avg_cost[symbol] = price
+                self._avg_cost[symbol] = exec_price
 
             self.trades.append({
                 "symbol": symbol,
                 "side": "buy",
-                "price": price,
+                "price": exec_price,
                 "quantity": quantity,
                 "commission": commission_cost,
-                "pnl": 0.0,
+                "pnl": -commission_cost,
                 "timestamp": order.get("timestamp"),
             })
         else:  # 卖出
+            # 滑点：卖出价下浮
+            exec_price = price * (1 - self.slippage)
             quantity = abs(quantity)
             if self.positions.get(symbol, 0) < quantity:
                 return False  # 持仓不足
 
             # 计算盈亏（必须在更新持仓之前取 avg_cost）
             avg_cost = self._avg_cost.get(symbol, 0.0)
-            pnl = (price - avg_cost) * quantity
+            gross_pnl = (exec_price - avg_cost) * quantity
+            commission_cost = exec_price * quantity * self.commission
+            net_pnl = gross_pnl - commission_cost
 
-            commission_cost = price * quantity * self.commission
-            proceeds = price * quantity * (1 - self.commission)
+            proceeds = exec_price * quantity * (1 - self.commission)
             self.cash += proceeds
             self.positions[symbol] = self.positions.get(symbol, 0) - quantity
             if self.positions[symbol] == 0:
@@ -72,10 +106,10 @@ class Portfolio:
             self.trades.append({
                 "symbol": symbol,
                 "side": "sell",
-                "price": price,
+                "price": exec_price,
                 "quantity": quantity,
                 "commission": commission_cost,
-                "pnl": pnl,
+                "pnl": net_pnl,
                 "timestamp": order.get("timestamp"),
             })
 
@@ -97,6 +131,7 @@ class BacktestEngine:
         symbol: str | list[str],
         initial_capital: float = 1000000.0,
         commission: float = 0.0003,
+        slippage: float = 0.001,
         period: str = "1min",
         params: dict | None = None,
     ):
@@ -116,11 +151,14 @@ class BacktestEngine:
         self.symbol = self.symbols[0]  # 保留第一个标的作为默认值
         self.initial_capital = initial_capital
         self.commission = commission
+        self.slippage = slippage
         self.period = period
         self.params = params or {}
 
     def run(self) -> dict:
         """运行回测
+
+        执行模型：信号在 bar N 生成，订单在 bar N+1 开盘价执行（含滑点）。
 
         Returns:
             回测结果字典
@@ -157,8 +195,8 @@ class BacktestEngine:
             params=self.params,
         )
 
-        # 创建投资组合
-        portfolio = Portfolio(self.initial_capital, self.commission)
+        # 创建投资组合（含滑点参数）
+        portfolio = Portfolio(self.initial_capital, self.commission, self.slippage)
 
         # 初始化策略
         executor.initialize(context)
@@ -170,7 +208,7 @@ class BacktestEngine:
                 df["timestamp"] = pd.to_datetime(df["timestamp"])
             resampled_data[symbol] = df.sort_values("timestamp").reset_index(drop=True)
 
-        # 收集所有时间戳并排序（用 datetime 而非字符串）
+        # 收集所有时间戳并排序
         all_timestamps = set()
         for df in resampled_data.values():
             all_timestamps.update(df["timestamp"].tolist())
@@ -178,6 +216,14 @@ class BacktestEngine:
 
         # 为每个标的建立行索引追踪
         row_indices = {symbol: 0 for symbol in resampled_data}
+
+        # 为每个标的创建持久的指标计算器（避免每轮重建）
+        indicator_objects: dict[str, SymbolIndicators] = {}
+        for symbol, df in resampled_data.items():
+            indicator_objects[symbol] = SymbolIndicators(df)
+
+        # 待执行订单队列（上一根 bar 生成的信号，在当前 bar 开盘执行）
+        pending_orders: list[dict] = []
 
         # 逐根K线回放
         for ts in sorted_timestamps:
@@ -207,33 +253,36 @@ class BacktestEngine:
             context.bar_index += 1
             context.datetime = str(ts)
 
-            # 更新每个标的的技术指标（使用行索引切片，O(1)）
-            for symbol in current_bars:
-                idx = row_indices[symbol]
-                history = resampled_data[symbol].iloc[:idx]
-                if len(history) > 0:
-                    context.indicators_map[symbol] = SymbolIndicators(history)
-
-            # 执行策略
-            orders = executor.handle_bar(context)
-
-            # 执行订单
-            for order in orders:
+            # --- 步骤 1：在当前 bar 开盘价执行上一根 bar 的挂单 ---
+            for order in pending_orders:
                 sym = order.get("symbol")
                 if sym in current_bars:
-                    portfolio.execute_order(order, current_bars[sym].close)
+                    portfolio.execute_order(order, current_bars[sym].open)
+                # 每笔订单执行后立即同步持仓到上下文
+                context.positions = portfolio.positions.copy()
+                context.cash = portfolio.cash
+            pending_orders = []
 
-            # 更新持仓到上下文
-            context.positions = portfolio.positions.copy()
-            context.cash = portfolio.cash
-            context.portfolio_value = portfolio.equity_curve[-1]
+            # --- 步骤 2：更新技术指标（增量，仅更新当前行索引）---
+            for symbol in current_bars:
+                idx = row_indices[symbol]
+                indicator_objects[symbol].set_current_idx(idx)
+                context.indicators_map[symbol] = indicator_objects[symbol]
 
-            # 更新组合价值
+            # --- 步骤 3：执行策略，生成新信号 ---
+            orders = executor.handle_bar(context)
+
+            # --- 步骤 4：新订单挂起，下一根 bar 开盘执行 ---
+            pending_orders = orders
+
+            # --- 步骤 5：更新组合价值 ---
             prices = {sym: bar.close for sym, bar in current_bars.items()}
             portfolio.update_value(prices)
+            context.portfolio_value = portfolio.equity_curve[-1]
 
         # 计算性能指标
-        metrics = calculate_metrics(portfolio.equity_curve, portfolio.trades)
+        bars_per_year = _bars_per_year(self.period)
+        metrics = calculate_metrics(portfolio.equity_curve, portfolio.trades, bars_per_year=bars_per_year)
 
         return {
             "status": "completed",

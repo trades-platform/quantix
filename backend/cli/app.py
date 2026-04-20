@@ -390,6 +390,7 @@ def run_backtest_cmd(
     end_date: str = typer.Argument(..., help="结束日期 YYYY-MM-DD"),
     initial_capital: float = typer.Option(1000000.0, help="初始资金"),
     commission: float = typer.Option(0.0003, help="手续费率"),
+    slippage: float = typer.Option(0.001, help="滑点比例，如 0.001 表示 0.1%"),
     period: str = typer.Option("1min", help="K线周期: 1min/5min/15min/30min/60min/120min/1D/1W/1M/1Q"),
     adjust: str = typer.Option("hfq", help="复权方式: none/qfq/hfq"),
 ):
@@ -438,6 +439,8 @@ def run_backtest_cmd(
             symbol=symbol,
             initial_capital=initial_capital,
             commission=commission,
+            slippage=slippage,
+            period=period,
         )
         result = engine.run()
 
@@ -462,6 +465,7 @@ def run_backtest_file_cmd(
     end_date: str = typer.Argument(..., help="结束日期 YYYY-MM-DD"),
     initial_capital: float = typer.Option(1000000.0, help="初始资金"),
     commission: float = typer.Option(0.0003, help="手续费率"),
+    slippage: float = typer.Option(0.001, help="滑点比例，如 0.001 表示 0.1%"),
     period: str = typer.Option("1min", help="K线周期: 1min/5min/15min/30min/60min/120min/1D/1W/1M/1Q"),
     adjust: str = typer.Option("hfq", help="复权方式: none/qfq/hfq"),
     params: str = typer.Option("{}", help="策略参数 (JSON), 如 '{\"short_period\":10,\"long_period\":30}'"),
@@ -517,6 +521,8 @@ def run_backtest_file_cmd(
         symbol=symbol,
         initial_capital=initial_capital,
         commission=commission,
+        slippage=slippage,
+        period=period,
         params=strategy_params,
     )
     result = engine.run()

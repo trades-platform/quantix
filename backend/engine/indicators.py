@@ -5,15 +5,29 @@ import numpy as np
 
 
 class SymbolIndicators:
-    """单个标的的技术指标计算器"""
+    """单个标的的技术指标计算器
+
+    使用 set_current_idx() 增量更新可见数据范围，
+    避免每根 bar 重建对象和全量重算。
+    """
 
     def __init__(self, data: pd.DataFrame):
         """初始化指标计算器
 
         Args:
-            data: 历史K线数据，包含列: timestamp, open, high, low, close, volume
+            data: 完整历史K线数据，包含列: timestamp, open, high, low, close, volume
         """
         self._data = data
+        self._current_idx = len(data)
+
+    def set_current_idx(self, idx: int):
+        """设置当前可见数据的截止行索引（不含 idx）"""
+        self._current_idx = idx
+
+    @property
+    def _visible(self) -> pd.DataFrame:
+        """当前可见的数据切片"""
+        return self._data.iloc[:self._current_idx]
 
     def ma(self, period: int) -> float:
         """简单移动平均线
@@ -24,9 +38,10 @@ class SymbolIndicators:
         Returns:
             MA 值，数据不足时返回 0.0
         """
-        if len(self._data) < period:
+        data = self._visible
+        if len(data) < period:
             return 0.0
-        return float(self._data["close"].tail(period).mean())
+        return float(data["close"].tail(period).mean())
 
     def ema(self, period: int) -> float:
         """指数移动平均线
@@ -37,9 +52,10 @@ class SymbolIndicators:
         Returns:
             EMA 值，数据不足时返回 0.0
         """
-        if len(self._data) < period:
+        data = self._visible
+        if len(data) < period:
             return 0.0
-        return float(self._data["close"].ewm(span=period, adjust=False).mean().iloc[-1])
+        return float(data["close"].ewm(span=period, adjust=False).mean().iloc[-1])
 
     def macd(self, fast: int = 12, slow: int = 26, signal: int = 9) -> tuple[float, float, float]:
         """MACD 指标
@@ -52,10 +68,11 @@ class SymbolIndicators:
         Returns:
             (macd_line, signal_line, histogram)
         """
-        if len(self._data) < slow + signal:
+        data = self._visible
+        if len(data) < slow + signal:
             return (0.0, 0.0, 0.0)
 
-        close = self._data["close"]
+        close = data["close"]
         ema_fast = close.ewm(span=fast, adjust=False).mean()
         ema_slow = close.ewm(span=slow, adjust=False).mean()
         macd_line = ema_fast - ema_slow
@@ -77,10 +94,11 @@ class SymbolIndicators:
         Returns:
             RSI 值 (0-100)，数据不足时返回 NaN
         """
-        if len(self._data) < period * 2:
+        data = self._visible
+        if len(data) < period * 2:
             return np.nan
 
-        close = self._data["close"].tail(period * 2)
+        close = data["close"].tail(period * 2)
         delta = close.diff()
 
         gain = delta.where(delta > 0, 0.0)
@@ -107,12 +125,13 @@ class SymbolIndicators:
         Returns:
             (upper, middle, lower)
         """
-        if len(self._data) < period:
+        data = self._visible
+        if len(data) < period:
             return (np.nan, np.nan, np.nan)
 
-        close_tail = self._data["close"].tail(period)
+        close_tail = data["close"].tail(period)
         middle = float(close_tail.mean())
-        std = float(close_tail.std())
+        std = float(close_tail.std(ddof=0))
         upper = middle + std_dev * std
         lower = middle - std_dev * std
 
@@ -127,12 +146,13 @@ class SymbolIndicators:
         Returns:
             ATR 值，数据不足时返回 NaN
         """
-        if len(self._data) < period + 1:
+        data = self._visible
+        if len(data) < period + 1:
             return np.nan
 
-        high = self._data["high"]
-        low = self._data["low"]
-        close = self._data["close"]
+        high = data["high"]
+        low = data["low"]
+        close = data["close"]
 
         prev_close = close.shift(1)
 
@@ -157,12 +177,13 @@ class SymbolIndicators:
         Returns:
             (K, D, J)
         """
-        if len(self._data) < n + m1 + m2:
+        data = self._visible
+        if len(data) < n + m1 + m2:
             return (np.nan, np.nan, np.nan)
 
         # 需要足够的历史数据来累积 K/D
         lookback = n + m1 + m2
-        data = self._data.tail(lookback)
+        visible_tail = data.tail(lookback)
 
         k = 50.0
         d = 50.0
@@ -170,15 +191,15 @@ class SymbolIndicators:
         alpha_k = 1.0 / m1
         alpha_d = 1.0 / m2
 
-        for i in range(n - 1, len(data)):
-            window = data.iloc[max(0, i - n + 1):i + 1]
+        for i in range(n - 1, len(visible_tail)):
+            window = visible_tail.iloc[max(0, i - n + 1):i + 1]
             highest = window["high"].max()
             lowest = window["low"].min()
 
             if highest == lowest:
                 rsv = 50.0
             else:
-                rsv = 100.0 * (data["close"].iloc[i] - lowest) / (highest - lowest)
+                rsv = 100.0 * (visible_tail["close"].iloc[i] - lowest) / (highest - lowest)
 
             k = (1 - alpha_k) * k + alpha_k * rsv
             d = (1 - alpha_d) * d + alpha_d * k
