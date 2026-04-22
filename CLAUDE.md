@@ -70,6 +70,25 @@ quantix serve --port 3000
 
 访问 `http://<host>:8000` 即可同时使用前端页面和 API。
 
+## CLI 回测约定
+
+使用 `quantix backtest run-file` 回测时，推荐以下默认参数：
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `start_date` | `1970-01-01` | 从最早可用数据开始 |
+| `end_date` | 当前日期 | 回测到今天 |
+| `--commission` | `0.000085` | 万分之 0.85（ETF 典型费率） |
+| `--slippage` | 按标的流动性 | 高流动性 ETF 0.03%~0.05%，中等 0.05%~0.08% |
+| `--period` | `1D` / `15min` 等 | 按策略需求选择 |
+| `--adjust` | `hfq` | 后复权 |
+
+示例：
+
+```bash
+quantix backtest run-file strategies/bollinger_reversion.py 159869.SZ 1970-01-01 2026-04-22 --period 15min --adjust hfq --commission 0.000085 --slippage 0.0003
+```
+
 ## Git 提交规则
 
 - 用英文描述
