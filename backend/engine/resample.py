@@ -19,22 +19,6 @@ VALID_PERIODS = (
 )
 
 
-def _agg_ohlcva(df: pd.DataFrame, group_col: str) -> pd.DataFrame:
-    """按指定列分组做 OHLCV+amount 聚合。"""
-    result = df.groupby(group_col).agg({
-        "open": "first",
-        "high": "max",
-        "low": "min",
-        "close": "last",
-        "volume": "sum",
-        "amount": "sum",
-        "timestamp": "first",
-    }).reset_index(drop=True)
-    result = result.sort_values("timestamp").reset_index(drop=True)
-    cols = ["timestamp", "open", "high", "low", "close", "volume", "amount"]
-    return result[cols]
-
-
 def _resample_60min(df: pd.DataFrame) -> pd.DataFrame:
     """按 A 股交易时段聚合为 60min K 线。
 
@@ -135,7 +119,6 @@ def _resample_by_session(df: pd.DataFrame) -> pd.DataFrame:
 def _resample_daily(df: pd.DataFrame) -> pd.DataFrame:
     """日线聚合。过滤非交易时间行后按日期分组。"""
     df = df.copy()
-    # 过滤掉非交易时间的行（如日线汇总数据 00:00:00）
     time_val = df["timestamp"].dt.hour * 100 + df["timestamp"].dt.minute
     df = df[((time_val >= 930) & (time_val <= 1130)) | ((time_val >= 1300) & (time_val <= 1500))]
 
@@ -149,36 +132,76 @@ def _resample_daily(df: pd.DataFrame) -> pd.DataFrame:
         "amount": "sum",
         "timestamp": "first",
     }).reset_index(drop=True)
+
+    result["timestamp"] = result["timestamp"].dt.normalize()
+
     return result.sort_values("timestamp").reset_index(drop=True)[
         ["timestamp", "open", "high", "low", "close", "volume", "amount"]
     ]
 
 
 def _resample_weekly(df: pd.DataFrame) -> pd.DataFrame:
-    """周线聚合。基于交易日数据，按自然周分组。
-
-    使用每个交易日的 isocalendar week 作为分组键，
-    天然跳过非交易日的间隙。
-    """
+    """周线聚合。基于交易日数据，按自然周分组。"""
     daily = _resample_daily(df)
-    # isocalendar().week 返回 ISO 周编号，配合年份可唯一定位一周
-    iso = daily["timestamp"].dt.isocalendar()
     daily["_week_key"] = daily["timestamp"].dt.strftime("%Y-W%V")
-    return _agg_ohlcva(daily, "_week_key")
+
+    result = daily.groupby("_week_key").agg({
+        "open": "first",
+        "high": "max",
+        "low": "min",
+        "close": "last",
+        "volume": "sum",
+        "amount": "sum",
+        "timestamp": "last",
+    }).reset_index(drop=True)
+
+    ts = result["timestamp"]
+    result["timestamp"] = (ts + pd.to_timedelta((4 - ts.dt.dayofweek) % 7, unit="D")).dt.normalize()
+    return result.sort_values("timestamp").reset_index(drop=True)[
+        ["timestamp", "open", "high", "low", "close", "volume", "amount"]
+    ]
 
 
 def _resample_monthly(df: pd.DataFrame) -> pd.DataFrame:
     """月线聚合。基于交易日数据，按年-月分组。"""
     daily = _resample_daily(df)
     daily["_month_key"] = daily["timestamp"].dt.strftime("%Y-%m")
-    return _agg_ohlcva(daily, "_month_key")
+
+    result = daily.groupby("_month_key", as_index=False).agg({
+        "open": "first",
+        "high": "max",
+        "low": "min",
+        "close": "last",
+        "volume": "sum",
+        "amount": "sum",
+    })
+
+    result["timestamp"] = result["_month_key"].apply(lambda x: pd.Timestamp(x) + pd.offsets.MonthEnd(0))
+    result = result.drop(columns="_month_key")
+    return result.sort_values("timestamp").reset_index(drop=True)[
+        ["timestamp", "open", "high", "low", "close", "volume", "amount"]
+    ]
 
 
 def _resample_quarterly(df: pd.DataFrame) -> pd.DataFrame:
     """季线聚合。基于交易日数据，按年-季分组。"""
     daily = _resample_daily(df)
     daily["_quarter_key"] = daily["timestamp"].dt.to_period("Q").astype(str)
-    return _agg_ohlcva(daily, "_quarter_key")
+
+    result = daily.groupby("_quarter_key", as_index=False).agg({
+        "open": "first",
+        "high": "max",
+        "low": "min",
+        "close": "last",
+        "volume": "sum",
+        "amount": "sum",
+    })
+
+    result["timestamp"] = result["_quarter_key"].apply(lambda x: pd.Period(x).end_time.normalize())
+    result = result.drop(columns="_quarter_key")
+    return result.sort_values("timestamp").reset_index(drop=True)[
+        ["timestamp", "open", "high", "low", "close", "volume", "amount"]
+    ]
 
 
 def resample_kline(kline_df: pd.DataFrame, period: str) -> pd.DataFrame:
@@ -226,13 +249,14 @@ def resample_kline(kline_df: pd.DataFrame, period: str) -> pd.DataFrame:
 
     else:
         # 分钟线重采样（5min, 15min, 30min）
+        # closed='left'/label='right'：[9:30, 9:35) 标记为 9:35，与券商 bar 结束时间一致
         df_indexed = df.set_index('timestamp')
 
         offset = PERIOD_MAP[period]
         resampled = df_indexed.resample(
             rule=offset,
             closed='left',
-            label='left'
+            label='right'
         ).agg({
             'open': 'first',
             'high': 'max',
@@ -244,36 +268,20 @@ def resample_kline(kline_df: pd.DataFrame, period: str) -> pd.DataFrame:
 
         resampled = resampled.reset_index()
 
-        # A股交易时段过滤
-        resampled['time_value'] = (
-            resampled['timestamp'].dt.hour * 100
-            + resampled['timestamp'].dt.minute
-        )
+        # A股交易时段过滤：保留 bar 结束时间落在交易时段内的行
+        def get_valid_ends(p: str) -> set[int]:
+            if p == "5min":
+                return set(range(935, 1131, 5)) | set(range(1305, 1501, 5))
+            elif p == "15min":
+                return {945, 1000, 1015, 1030, 1045, 1100, 1115, 1130,
+                        1315, 1330, 1345, 1400, 1415, 1430, 1445, 1500}
+            elif p == "30min":
+                return {1000, 1030, 1100, 1130, 1330, 1400, 1430, 1500}
+            return set()
 
-        def is_valid_trading_time(ts):
-            time_val = ts.hour * 100 + ts.minute
-
-            if period == "5min":
-                valid_starts = []
-                for t in range(930, 1131, 5):
-                    valid_starts.append(t)
-                for t in range(1300, 1501, 5):
-                    valid_starts.append(t)
-                return time_val in valid_starts
-            elif period == "15min":
-                valid_starts = [930, 945, 1000, 1015, 1030, 1045, 1100, 1115,
-                               1300, 1315, 1330, 1345, 1400, 1415, 1430, 1445]
-                return time_val in valid_starts
-            elif period == "30min":
-                valid_starts = [930, 1000, 1030, 1100, 1300, 1330, 1400, 1430]
-                return time_val in valid_starts
-
-            in_morning = 930 <= time_val <= 1130
-            in_afternoon = 1300 <= time_val <= 1500
-            return in_morning or in_afternoon
-
-        resampled = resampled[resampled['timestamp'].apply(is_valid_trading_time)]
-        resampled = resampled.drop(columns=['time_value'])
+        valid_ends = get_valid_ends(period)
+        tv = resampled['timestamp'].dt.hour * 100 + resampled['timestamp'].dt.minute
+        resampled = resampled[tv.isin(valid_ends)]
         resampled = resampled.dropna()
         result = resampled.reset_index(drop=True)
 
