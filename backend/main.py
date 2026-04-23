@@ -1,8 +1,9 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.api.router import add_cors_middleware, api_router
@@ -22,7 +23,12 @@ add_cors_middleware(app)
 
 app.include_router(api_router, prefix="/api")
 
-# 托管前端构建产物
+# 托管前端构建产物（SPA fallback）
 FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 if FRONTEND_DIST.is_dir():
-    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")
+    @app.get("/{full_path:path}")
+    async def serve_spa(request: Request, full_path: str):
+        file = (FRONTEND_DIST / full_path).resolve()
+        if str(file).startswith(str(FRONTEND_DIST.resolve())) and file.is_file():
+            return FileResponse(file)
+        return FileResponse(FRONTEND_DIST / "index.html")

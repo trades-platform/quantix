@@ -336,7 +336,7 @@ onMounted(() => {
           </tr>
           <tr v-else v-for="strategy in strategies" :key="strategy.id" class="hover:bg-gray-50 transition-colors">
             <td class="px-6 py-4 whitespace-nowrap">
-              <div class="font-medium text-gray-900">{{ strategy.name }}</div>
+              <button type="button" @click="editStrategy(strategy.id)" class="font-medium text-gray-900 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:rounded transition-colors">{{ strategy.name }}</button>
             </td>
             <td class="px-6 py-4">
               <div class="text-sm text-gray-600 max-w-xs truncate" :title="strategy.description">
@@ -368,7 +368,7 @@ onMounted(() => {
     <Teleport to="body">
       <div
         v-if="showEditor"
-        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+        class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
         @click.self="showEditor = false"
       >
         <div class="bg-white rounded-lg shadow-xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
@@ -478,7 +478,7 @@ onMounted(() => {
     <Teleport to="body">
       <div
         v-if="deletingId"
-        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+        class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
         @click.self="deletingId = null"
       >
         <div class="bg-white rounded-lg shadow-xl w-full max-w-md">
