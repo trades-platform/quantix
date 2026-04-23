@@ -413,44 +413,23 @@ def run_backtest_cmd(
     adjust: str = typer.Option("hfq", help="复权方式: none/qfq/hfq"),
 ):
     """运行回测（使用数据库中的策略）"""
-    from decimal import Decimal
-
     from backend.db import SessionLocal, get_market_data
     from backend.engine import BacktestEngine
     from backend.models import Backtest, Strategy
+
+    # 查询数据
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+    data_dict = get_market_data(symbol, start_dt, end_dt, period=period, adjust=adjust)
+
+    if not data_dict or symbol not in data_dict:
+        typer.echo(f"无 {symbol} 的K线数据", err=True)
+        raise typer.Exit(1)
 
     with SessionLocal() as db:
         strategy = db.query(Strategy).filter(Strategy.id == strategy_id).first()
         if not strategy:
             typer.echo(f"策略 ID {strategy_id} 不存在", err=True)
-            raise typer.Exit(1)
-
-        # 创建回测记录
-        backtest = Backtest(
-            strategy_id=strategy_id,
-            symbol=symbol,
-            start_date=datetime.strptime(start_date, "%Y-%m-%d").date(),
-            end_date=datetime.strptime(end_date, "%Y-%m-%d").date(),
-            initial_capital=Decimal(str(initial_capital)),
-            commission=Decimal(str(commission)),
-            slippage=Decimal(str(slippage)),
-            period=period,
-            adjust=adjust,
-            status="running",
-        )
-        db.add(backtest)
-        db.commit()
-        db.refresh(backtest)
-
-        # 查询数据
-        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-        data_dict = get_market_data(symbol, start_dt, end_dt, period=period, adjust=adjust)
-
-        if not data_dict or symbol not in data_dict:
-            backtest.status = "failed"
-            db.commit()
-            typer.echo(f"无 {symbol} 的K线数据", err=True)
             raise typer.Exit(1)
 
         typer.echo(f"开始回测: {symbol} ({start_date} ~ {end_date}) period={period} adjust={adjust}")
@@ -467,18 +446,34 @@ def run_backtest_cmd(
         )
         result = engine.run()
 
-        # 更新结果
-        backtest.status = result["status"]
-        backtest.total_return = Decimal(str(result["metrics"]["total_return"]))
-        backtest.annual_return = Decimal(str(result["metrics"]["annual_return"]))
-        backtest.sharpe_ratio = Decimal(str(result["metrics"]["sharpe_ratio"]))
-        backtest.max_drawdown = Decimal(str(result["metrics"]["max_drawdown"]))
-        backtest.win_rate = Decimal(str(result["metrics"]["win_rate"]))
-        backtest.equity_curve = json.dumps(result["equity_curve"])
-        db.commit()
+        try:
+            backtest = Backtest(
+                strategy_id=strategy_id,
+                symbol=symbol,
+                start_date=datetime.strptime(start_date, "%Y-%m-%d").date(),
+                end_date=datetime.strptime(end_date, "%Y-%m-%d").date(),
+                initial_capital=Decimal(str(initial_capital)),
+                commission=Decimal(str(commission)),
+                slippage=Decimal(str(slippage)),
+                period=period,
+                adjust=adjust,
+                status=result["status"],
+                total_return=Decimal(str(result["metrics"]["total_return"])),
+                annual_return=Decimal(str(result["metrics"]["annual_return"])),
+                sharpe_ratio=Decimal(str(result["metrics"]["sharpe_ratio"])),
+                max_drawdown=Decimal(str(result["metrics"]["max_drawdown"])),
+                win_rate=Decimal(str(result["metrics"]["win_rate"])),
+                equity_curve=json.dumps(result["equity_curve"]),
+            )
+            db.add(backtest)
+            db.flush()
 
-        _persist_trades(db, backtest.id, result["trades"])
-        db.commit()
+            _persist_trades(db, backtest.id, result["trades"])
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            typer.echo(f"保存回测结果失败: {e}", err=True)
+            raise typer.Exit(1)
 
         _print_backtest_result(result)
 
@@ -587,34 +582,36 @@ def run_backtest_file_cmd(
                 if not strategy:
                     strategy = Strategy(name=strategy_name, code=strategy_code)
                     db.add(strategy)
-                    db.commit()
-                    db.refresh(strategy)
 
-            backtest = Backtest(
-                strategy_id=strategy.id,
-                symbol=symbol,
-                start_date=datetime.strptime(start_date, "%Y-%m-%d").date(),
-                end_date=datetime.strptime(end_date, "%Y-%m-%d").date(),
-                initial_capital=Decimal(str(initial_capital)),
-                commission=Decimal(str(commission)),
-                slippage=Decimal(str(slippage)),
-                period=period,
-                adjust=adjust,
-                status=result["status"],
-                total_return=Decimal(str(result["metrics"]["total_return"])),
-                annual_return=Decimal(str(result["metrics"]["annual_return"])),
-                sharpe_ratio=Decimal(str(result["metrics"]["sharpe_ratio"])),
-                max_drawdown=Decimal(str(result["metrics"]["max_drawdown"])),
-                win_rate=Decimal(str(result["metrics"]["win_rate"])),
-                equity_curve=json.dumps(result["equity_curve"]),
-            )
-            db.add(backtest)
-            db.commit()
-            db.refresh(backtest)
+            try:
+                backtest = Backtest(
+                    strategy_id=strategy.id,
+                    symbol=symbol,
+                    start_date=datetime.strptime(start_date, "%Y-%m-%d").date(),
+                    end_date=datetime.strptime(end_date, "%Y-%m-%d").date(),
+                    initial_capital=Decimal(str(initial_capital)),
+                    commission=Decimal(str(commission)),
+                    slippage=Decimal(str(slippage)),
+                    period=period,
+                    adjust=adjust,
+                    status=result["status"],
+                    total_return=Decimal(str(result["metrics"]["total_return"])),
+                    annual_return=Decimal(str(result["metrics"]["annual_return"])),
+                    sharpe_ratio=Decimal(str(result["metrics"]["sharpe_ratio"])),
+                    max_drawdown=Decimal(str(result["metrics"]["max_drawdown"])),
+                    win_rate=Decimal(str(result["metrics"]["win_rate"])),
+                    equity_curve=json.dumps(result["equity_curve"]),
+                )
+                db.add(backtest)
+                db.flush()
 
-            _persist_trades(db, backtest.id, result["trades"])
-            db.commit()
-            saved_backtest_id = backtest.id
+                _persist_trades(db, backtest.id, result["trades"])
+                db.commit()
+                saved_backtest_id = backtest.id
+            except Exception as e:
+                db.rollback()
+                typer.echo(f"保存回测结果失败: {e}", err=True)
+                raise typer.Exit(1)
 
         typer.echo(f"回测结果已保存，ID: {saved_backtest_id}")
 
