@@ -89,6 +89,8 @@ quantix serve --port 3000
 quantix backtest run-file strategies/bollinger_reversion.py 159869.SZ 1970-01-01 2026-04-22 --period 15min --adjust hfq --commission 0.000085 --slippage 0.0003
 ```
 
+回测生成的报告文档（markdown）输出到 `docs/reports/`，该目录已加入 `.gitignore`。
+
 ## Git 提交规则
 
 - 用英文描述
