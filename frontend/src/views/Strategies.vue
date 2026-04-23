@@ -285,15 +285,18 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="p-8">
-    <div class="flex justify-between items-center">
+  <div class="p-4 sm:p-6 lg:p-8">
+    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
       <div>
         <h1 class="text-3xl font-bold text-gray-900">策略管理</h1>
-        <p class="mt-1 text-gray-600">创建和管理您的量化交易策略</p>
+        <div class="flex items-center mt-2">
+          <div class="h-[3px] w-12 rounded-full bg-gradient-to-r from-blue-500 to-blue-600 mr-3"></div>
+          <p class="text-gray-500">创建和管理您的量化交易策略</p>
+        </div>
       </div>
       <button
         @click="openCreate"
-        class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center transition-colors"
+        class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-5 py-2.5 rounded-lg hover:from-blue-700 hover:to-blue-800 flex items-center shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
@@ -302,10 +305,10 @@ onMounted(() => {
       </button>
     </div>
 
-    <div class="mt-8 bg-white rounded-lg shadow overflow-hidden">
-      <div class="px-6 py-4 border-b flex justify-between items-center">
+    <div class="mt-8 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+      <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
         <h2 class="text-lg font-semibold">策略列表</h2>
-        <span class="text-sm text-gray-500">{{ strategies.length }} 个策略</span>
+        <span class="text-sm text-gray-500 bg-gray-50 px-2.5 py-1 rounded-full">{{ strategies.length }} 个策略</span>
       </div>
       <table class="min-w-full">
         <thead class="bg-gray-50">
@@ -326,12 +329,14 @@ onMounted(() => {
             </td>
           </tr>
           <tr v-else-if="strategies.length === 0">
-            <td colspan="4" class="px-6 py-12 text-center text-gray-500">
-              <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              <p class="mt-2">暂无策略</p>
-              <p class="text-sm">点击上方按钮创建第一个策略</p>
+            <td colspan="4" class="px-6 py-12 text-center">
+              <div class="bg-gray-50/50 rounded-xl p-8 mx-4">
+                <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <p class="mt-3 text-gray-600 font-medium">暂无策略</p>
+                <p class="text-sm text-gray-400 mt-1">点击上方按钮创建第一个策略</p>
+              </div>
             </td>
           </tr>
           <tr v-else v-for="strategy in strategies" :key="strategy.id" class="hover:bg-gray-50 transition-colors">
@@ -368,10 +373,10 @@ onMounted(() => {
     <Teleport to="body">
       <div
         v-if="showEditor"
-        class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+        class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
         @click.self="showEditor = false"
       >
-        <div class="bg-white rounded-lg shadow-xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
           <div class="px-6 py-4 border-b flex justify-between items-center">
             <h2 class="text-xl font-semibold">
               {{ editingId ? '编辑策略' : '创建策略' }}
@@ -409,8 +414,8 @@ onMounted(() => {
                 <input
                   v-model="form.name"
                   type="text"
-                  class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  :class="{ 'border-red-500': formErrors.name }"
+                  class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50 focus:bg-white transition-all"
+                  :class="{ 'border-red-500 focus:border-red-500 focus:ring-red-500/20': formErrors.name }"
                   placeholder="例如：双均线策略"
                 />
                 <p v-if="formErrors.name" class="text-sm text-red-600 mt-1">
@@ -423,7 +428,7 @@ onMounted(() => {
                 <textarea
                   v-model="form.description"
                   rows="2"
-                  class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50 focus:bg-white transition-all resize-none"
                   placeholder="简要描述策略逻辑和特点"
                 ></textarea>
               </div>
@@ -432,7 +437,7 @@ onMounted(() => {
                 <label class="block text-sm font-medium text-gray-700 mb-1">
                   策略代码 <span class="text-red-500">*</span>
                 </label>
-                <div class="border rounded-lg overflow-hidden" :class="{ 'border-red-500': formErrors.code }" style="height: 400px">
+                <div class="border rounded-lg overflow-hidden transition-all" :class="{ 'border-red-500 ring-2 ring-red-500/20': formErrors.code, 'border-gray-200 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20': !formErrors.code }" style="height: 400px">
                   <CodeEditor v-model="form.code" language="python" />
                 </div>
                 <p v-if="formErrors.code" class="text-sm text-red-600 mt-1">
@@ -466,7 +471,7 @@ onMounted(() => {
             <button
               @click="editingId ? updateStrategy() : createStrategy()"
               :disabled="saving"
-              class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+              class="px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
             >
               {{ saving ? '保存中...' : (editingId ? '更新' : '创建') }}
             </button>
@@ -478,24 +483,31 @@ onMounted(() => {
     <Teleport to="body">
       <div
         v-if="deletingId"
-        class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+        class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
         @click.self="deletingId = null"
       >
-        <div class="bg-white rounded-lg shadow-xl w-full max-w-md">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
           <div class="p-6">
-            <h3 class="text-lg font-semibold text-gray-900 mb-2">确认删除</h3>
-            <p class="text-gray-600">确定要删除这个策略吗？此操作无法撤销。</p>
+            <div class="flex items-center gap-3 mb-3">
+              <div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+              <h3 class="text-lg font-semibold text-gray-900">确认删除</h3>
+            </div>
+            <p class="text-gray-600 ml-13 pl-1">确定要删除这个策略吗？此操作无法撤销。</p>
           </div>
           <div class="px-6 py-4 bg-gray-50 flex justify-end space-x-3">
             <button
               @click="deletingId = null"
-              class="px-4 py-2 border rounded-lg hover:bg-gray-100 transition-colors"
+              class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-white hover:border-gray-400 transition-all"
             >
               取消
             </button>
             <button
               @click="deleteStrategy"
-              class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors shadow-sm"
             >
               删除
             </button>

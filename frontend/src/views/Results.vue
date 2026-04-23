@@ -274,15 +274,18 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="p-8">
-    <div class="flex justify-between items-start">
+  <div class="p-4 sm:p-6 lg:p-8">
+    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
       <div>
         <h1 class="text-3xl font-bold text-gray-900">回测结果</h1>
-        <p class="mt-2 text-gray-600">查看策略回测的详细分析报告</p>
+        <div class="flex items-center mt-2">
+          <div class="h-[3px] w-12 rounded-full bg-gradient-to-r from-blue-500 to-blue-600 mr-3"></div>
+          <p class="text-gray-500">查看策略回测的详细分析报告</p>
+        </div>
       </div>
       <button
         @click="runNewBacktest"
-        class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+        class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-5 py-2.5 rounded-lg hover:from-blue-700 hover:to-blue-800 shadow-sm transition-all self-start"
       >
         新建回测
       </button>
@@ -294,14 +297,14 @@ onMounted(() => {
     </div>
 
     <div v-else-if="currentBacktest">
-      <div class="mt-6 bg-gray-50 rounded-lg p-4 flex justify-between items-center">
-        <div>
+      <div class="mt-6 bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div class="flex flex-wrap items-center gap-y-1">
           <span class="text-sm text-gray-600">标的: </span>
-          <span class="font-medium">{{ currentBacktest.symbol }}</span>
-          <span class="mx-3 text-gray-300">|</span>
+          <span class="font-medium mr-3">{{ currentBacktest.symbol }}</span>
+          <span class="text-gray-300 hidden sm:inline mr-3">|</span>
           <span class="text-sm text-gray-600">期间: </span>
-          <span class="font-medium">{{ currentBacktest.start_date }} 至 {{ currentBacktest.end_date }}</span>
-          <span class="mx-3 text-gray-300">|</span>
+          <span class="font-medium mr-3">{{ currentBacktest.start_date }} 至 {{ currentBacktest.end_date }}</span>
+          <span class="text-gray-300 hidden sm:inline mr-3">|</span>
           <span class="text-sm text-gray-600">初始资金: </span>
           <span class="font-medium">{{ formatCurrency(currentBacktest.initial_capital) }}</span>
         </div>
@@ -314,8 +317,8 @@ onMounted(() => {
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mt-8">
-        <div class="bg-white rounded-lg shadow p-6 border-l-4" :class="currentBacktest.total_return >= 0 ? 'border-red-500' : 'border-green-500'">
-          <p class="text-sm text-gray-600">总收益率</p>
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 border-l-4 hover:shadow-md transition-shadow duration-200" :class="currentBacktest.total_return >= 0 ? 'border-l-red-500' : 'border-l-green-500'">
+          <p class="text-sm text-gray-500">总收益率</p>
           <p
             class="text-3xl font-bold mt-2"
             :class="currentBacktest.total_return >= 0 ? 'text-red-600' : 'text-green-600'"
@@ -323,8 +326,8 @@ onMounted(() => {
             {{ formatPercent(currentBacktest.total_return) }}
           </p>
         </div>
-        <div class="bg-white rounded-lg shadow p-6 border-l-4 border-blue-500">
-          <p class="text-sm text-gray-600">年化收益</p>
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 border-l-4 border-l-blue-500 hover:shadow-md transition-shadow duration-200">
+          <p class="text-sm text-gray-500">年化收益</p>
           <p
             class="text-3xl font-bold mt-2"
             :class="currentBacktest.annual_return >= 0 ? 'text-red-600' : 'text-green-600'"
@@ -332,14 +335,14 @@ onMounted(() => {
             {{ formatPercent(currentBacktest.annual_return) }}
           </p>
         </div>
-        <div class="bg-white rounded-lg shadow p-6 border-l-4 border-purple-500">
-          <p class="text-sm text-gray-600">夏普比率</p>
-          <p class="text-3xl font-bold mt-2 text-purple-600">
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 border-l-4 border-l-violet-500 hover:shadow-md transition-shadow duration-200">
+          <p class="text-sm text-gray-500">夏普比率</p>
+          <p class="text-3xl font-bold mt-2 text-violet-600">
             {{ currentBacktest.sharpe_ratio?.toFixed(2) || '-' }}
           </p>
         </div>
-        <div class="bg-white rounded-lg shadow p-6 border-l-4 border-green-500">
-          <p class="text-sm text-gray-600">最大回撤</p>
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 border-l-4 border-l-green-500 hover:shadow-md transition-shadow duration-200">
+          <p class="text-sm text-gray-500">最大回撤</p>
           <p class="text-3xl font-bold mt-2 text-green-600">
             {{ formatPercent(currentBacktest.max_drawdown) }}
           </p>
@@ -347,26 +350,26 @@ onMounted(() => {
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mt-6">
-        <div class="bg-white rounded-lg shadow p-6">
-          <p class="text-sm text-gray-600">胜率</p>
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition-shadow duration-200">
+          <p class="text-sm text-gray-500">胜率</p>
           <p class="text-xl font-bold mt-2 text-blue-600">
             {{ formatPercent(currentBacktest.win_rate) }}
           </p>
         </div>
-        <div class="bg-white rounded-lg shadow p-6">
-          <p class="text-sm text-gray-600">交易次数</p>
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition-shadow duration-200">
+          <p class="text-sm text-gray-500">交易次数</p>
           <p class="text-xl font-bold mt-2 text-gray-900">
             {{ trades.length }}
           </p>
         </div>
-        <div class="bg-white rounded-lg shadow p-6">
-          <p class="text-sm text-gray-600">最终资产</p>
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition-shadow duration-200">
+          <p class="text-sm text-gray-500">最终资产</p>
           <p class="text-xl font-bold mt-2 text-gray-900">
             {{ formatCurrency(currentBacktest.initial_capital * (1 + (currentBacktest.total_return || 0))) }}
           </p>
         </div>
-        <div class="bg-white rounded-lg shadow p-6">
-          <p class="text-sm text-gray-600">回测时间</p>
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition-shadow duration-200">
+          <p class="text-sm text-gray-500">回测时间</p>
           <p class="text-sm font-medium mt-2 text-gray-700">
             {{ new Date(currentBacktest.created_at).toLocaleString('zh-CN') }}
           </p>
@@ -374,21 +377,21 @@ onMounted(() => {
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
-        <div class="bg-white rounded-lg shadow p-6">
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 min-h-[384px]">
           <v-chart class="h-96" :option="equityChartOption" autoresize />
         </div>
 
-        <div class="bg-white rounded-lg shadow p-6">
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 min-h-[384px]">
           <v-chart class="h-96" :option="returnDistributionOption" autoresize />
         </div>
       </div>
 
-      <div v-if="currentBacktest.monthly_returns" class="mt-8 bg-white rounded-lg shadow p-6">
+      <div v-if="currentBacktest.monthly_returns" class="mt-8 bg-white rounded-xl shadow-sm border border-gray-100 p-6 min-h-[320px]">
         <v-chart class="h-80" :option="monthlyReturnOption" autoresize />
       </div>
 
-      <div class="mt-8 bg-white rounded-lg shadow overflow-hidden">
-        <div class="px-6 py-4 border-b flex justify-between items-center">
+      <div class="mt-8 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
           <h2 class="text-lg font-semibold">交易明细</h2>
           <span class="text-sm text-gray-500">{{ trades.length }} 笔交易</span>
         </div>
@@ -447,15 +450,15 @@ onMounted(() => {
       </div>
     </div>
 
-    <div v-else class="mt-8 text-center py-16 bg-white rounded-lg shadow">
-      <svg class="mx-auto h-16 w-16 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+    <div v-else class="mt-8 text-center py-16 bg-white rounded-xl shadow-sm border border-gray-100">
+      <svg class="mx-auto h-16 w-16 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
       </svg>
       <h3 class="mt-4 text-lg font-medium text-gray-900">暂无回测结果</h3>
-      <p class="mt-2 text-gray-600">请先从回测配置页面运行回测</p>
+      <p class="mt-2 text-gray-500">请先从回测配置页面运行回测</p>
       <button
         @click="runNewBacktest"
-        class="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+        class="mt-6 bg-gradient-to-r from-blue-600 to-blue-700 text-white px-5 py-2.5 rounded-lg hover:from-blue-700 hover:to-blue-800 shadow-sm transition-all"
       >
         去运行回测
       </button>

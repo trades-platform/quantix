@@ -181,15 +181,18 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="p-8">
+  <div class="p-4 sm:p-6 lg:p-8">
     <div class="mb-6">
       <h1 class="text-3xl font-bold text-gray-900">回测配置</h1>
-      <p class="mt-2 text-gray-600">配置参数并运行策略回测</p>
+      <div class="flex items-center mt-2">
+        <div class="h-[3px] w-12 rounded-full bg-gradient-to-r from-blue-500 to-blue-600 mr-3"></div>
+        <p class="text-gray-500">配置参数并运行策略回测</p>
+      </div>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
       <div class="lg:col-span-2">
-        <div class="bg-white rounded-lg shadow p-6">
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
           <form @submit.prevent="runBacktest" class="space-y-6">
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-2">
@@ -197,8 +200,8 @@ onMounted(() => {
               </label>
               <select
                 v-model="form.strategy_id"
-                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                :class="{ 'border-red-500': formErrors.strategy_id }"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50 focus:bg-white transition-all"
+                :class="{ 'border-red-500 focus:border-red-500 focus:ring-red-500/20': formErrors.strategy_id }"
                 :disabled="loading"
               >
                 <option value="">请选择策略</option>
@@ -217,8 +220,8 @@ onMounted(() => {
               </label>
               <select
                 v-model="form.symbol"
-                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                :class="{ 'border-red-500': formErrors.symbol }"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50 focus:bg-white transition-all"
+                :class="{ 'border-red-500 focus:border-red-500 focus:ring-red-500/20': formErrors.symbol }"
                 :disabled="loading"
               >
                 <option value="">请选择标的</option>
@@ -242,7 +245,7 @@ onMounted(() => {
                     :key="preset.name"
                     type="button"
                     @click="applyPreset(preset.days)"
-                    class="text-xs px-2 py-1 border rounded hover:bg-gray-50 transition-colors"
+                    class="text-xs px-2 py-1 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 hover:border-gray-300 transition-all"
                   >
                     {{ preset.name }}
                   </button>
@@ -253,8 +256,8 @@ onMounted(() => {
                   <input
                     v-model="form.start_date"
                     type="date"
-                    class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    :class="{ 'border-red-500': formErrors.start_date }"
+                    class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50 focus:bg-white transition-all"
+                    :class="{ 'border-red-500 focus:border-red-500 focus:ring-red-500/20': formErrors.start_date }"
                   />
                   <p v-if="formErrors.start_date" class="text-sm text-red-600 mt-1">
                     {{ formErrors.start_date }}
@@ -264,8 +267,8 @@ onMounted(() => {
                   <input
                     v-model="form.end_date"
                     type="date"
-                    class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    :class="{ 'border-red-500': formErrors.end_date }"
+                    class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50 focus:bg-white transition-all"
+                    :class="{ 'border-red-500 focus:border-red-500 focus:ring-red-500/20': formErrors.end_date }"
                   />
                   <p v-if="formErrors.end_date" class="text-sm text-red-600 mt-1">
                     {{ formErrors.end_date }}
@@ -286,8 +289,8 @@ onMounted(() => {
                   step="10000"
                   min="10000"
                   max="100000000"
-                  class="w-full pl-8 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  :class="{ 'border-red-500': formErrors.initial_capital }"
+                  class="w-full pl-8 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50 focus:bg-white transition-all"
+                  :class="{ 'border-red-500 focus:border-red-500 focus:ring-red-500/20': formErrors.initial_capital }"
                 />
               </div>
               <p v-if="formErrors.initial_capital" class="text-sm text-red-600 mt-1">
@@ -309,8 +312,8 @@ onMounted(() => {
                   step="0.0001"
                   min="0"
                   max="0.1"
-                  class="w-full px-3 py-2 pr-16 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  :class="{ 'border-red-500': formErrors.commission }"
+                  class="w-full px-3 py-2 pr-16 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50 focus:bg-white transition-all"
+                  :class="{ 'border-red-500 focus:border-red-500 focus:ring-red-500/20': formErrors.commission }"
                 />
                 <span class="absolute right-3 top-2 text-gray-500 text-sm">比例</span>
               </div>
@@ -321,24 +324,24 @@ onMounted(() => {
                 <button
                   type="button"
                   @click="form.commission = 0.0003"
-                  class="text-xs px-2 py-1 border rounded hover:bg-gray-50 transition-colors"
-                  :class="{ 'bg-blue-50 border-blue-500 text-blue-700': form.commission === 0.0003 }"
+                  class="text-xs px-2 py-1 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 hover:border-gray-300 transition-all"
+                  :class="{ 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm': form.commission === 0.0003 }"
                 >
                   万分之三
                 </button>
                 <button
                   type="button"
                   @click="form.commission = 0.0001"
-                  class="text-xs px-2 py-1 border rounded hover:bg-gray-50 transition-colors"
-                  :class="{ 'bg-blue-50 border-blue-500 text-blue-700': form.commission === 0.0001 }"
+                  class="text-xs px-2 py-1 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 hover:border-gray-300 transition-all"
+                  :class="{ 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm': form.commission === 0.0001 }"
                 >
                   万分之一
                 </button>
                 <button
                   type="button"
                   @click="form.commission = 0.001"
-                  class="text-xs px-2 py-1 border rounded hover:bg-gray-50 transition-colors"
-                  :class="{ 'bg-blue-50 border-blue-500 text-blue-700': form.commission === 0.001 }"
+                  class="text-xs px-2 py-1 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 hover:border-gray-300 transition-all"
+                  :class="{ 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm': form.commission === 0.001 }"
                 >
                   千分之一
                 </button>
@@ -355,8 +358,8 @@ onMounted(() => {
                   :key="p"
                   type="button"
                   @click="form.period = p"
-                  class="text-sm px-3 py-1.5 border rounded-lg hover:bg-gray-50 transition-colors"
-                  :class="{ 'bg-blue-50 border-blue-500 text-blue-700': form.period === p }"
+                  class="text-sm px-3 py-1.5 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 hover:border-gray-300 transition-all"
+                  :class="{ 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm': form.period === p }"
                 >
                   {{ { '1D': '日线', '1W': '周线', '1M': '月线', '1Q': '季线', '120min': '2h' }[p] || p }}
                 </button>
@@ -376,8 +379,8 @@ onMounted(() => {
                   :key="opt.value"
                   type="button"
                   @click="form.adjust = opt.value"
-                  class="text-sm px-3 py-1.5 border rounded-lg hover:bg-gray-50 transition-colors"
-                  :class="{ 'bg-blue-50 border-blue-500 text-blue-700': form.adjust === opt.value }"
+                  class="text-sm px-3 py-1.5 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 hover:border-gray-300 transition-all"
+                  :class="{ 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm': form.adjust === opt.value }"
                 >
                   {{ opt.label }}
                 </button>
@@ -391,7 +394,7 @@ onMounted(() => {
               <button
                 type="submit"
                 :disabled="running"
-                class="bg-blue-600 text-white px-8 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center transition-colors"
+                class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-8 py-2.5 rounded-lg hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center shadow-sm transition-all"
               >
                 <svg v-if="running" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
                   <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -404,8 +407,8 @@ onMounted(() => {
         </div>
       </div>
 
-      <div class="space-y-6">
-        <div class="bg-white rounded-lg shadow p-6">
+      <div class="space-y-6 lg:sticky lg:top-6 lg:self-start">
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
           <h3 class="font-semibold text-gray-900 mb-4">配置摘要</h3>
           <div class="space-y-3 text-sm">
             <div class="flex justify-between">

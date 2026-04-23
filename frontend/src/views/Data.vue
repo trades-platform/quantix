@@ -215,16 +215,19 @@ watch(selectedSymbol, () => {
 </script>
 
 <template>
-  <div class="p-8">
-    <div class="flex justify-between items-center mb-6">
+  <div class="p-4 sm:p-6 lg:p-8">
+    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
       <div>
         <h1 class="text-3xl font-bold text-gray-900">数据管理</h1>
-        <p class="mt-1 text-gray-600">管理K线数据和查看行情信息</p>
+        <div class="flex items-center mt-2">
+          <div class="h-[3px] w-12 rounded-full bg-gradient-to-r from-blue-500 to-blue-600 mr-3"></div>
+          <p class="text-gray-500">管理K线数据和查看行情信息</p>
+        </div>
       </div>
       <div class="flex space-x-3">
         <button
           @click="openFetchDialog"
-          class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center transition-colors"
+          class="bg-gradient-to-r from-emerald-600 to-emerald-700 text-white px-5 py-2.5 rounded-lg hover:from-emerald-700 hover:to-emerald-800 flex items-center shadow-sm transition-all"
         >
           <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -233,7 +236,7 @@ watch(selectedSymbol, () => {
         </button>
         <button
           @click="openBatchFetchDialog"
-          class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 flex items-center transition-colors"
+          class="bg-gradient-to-r from-violet-600 to-violet-700 text-white px-5 py-2.5 rounded-lg hover:from-violet-700 hover:to-violet-800 flex items-center shadow-sm transition-all"
         >
           <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
@@ -245,14 +248,14 @@ watch(selectedSymbol, () => {
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
       <div class="lg:col-span-1">
-        <div class="bg-white rounded-lg shadow">
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100">
           <div class="p-4 border-b">
             <div class="flex space-x-2">
               <input
                 v-model="searchQuery"
                 type="text"
                 placeholder="搜索标的代码或名称..."
-                class="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                class="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50 focus:bg-white transition-all"
               />
               <button
                 @click="fetchSymbols"
@@ -338,37 +341,37 @@ watch(selectedSymbol, () => {
       </div>
 
       <div class="lg:col-span-2">
-        <div v-if="!selectedSymbol" class="bg-white rounded-lg shadow p-12 text-center">
-          <svg class="mx-auto h-16 w-16 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+        <div v-if="!selectedSymbol" class="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
+          <svg class="mx-auto h-16 w-16 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
           </svg>
           <h3 class="mt-4 text-lg font-medium text-gray-900">请选择标的</h3>
-          <p class="mt-2 text-gray-600">从左侧列表选择一个标的查看K线数据</p>
+          <p class="mt-2 text-gray-500">从左侧列表选择一个标的查看K线数据</p>
         </div>
 
         <div v-else>
           <div v-if="klineStats" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <div class="bg-white rounded-lg shadow p-4">
-              <p class="text-xs text-gray-600">数据点数</p>
-              <p class="text-lg font-bold mt-1">{{ klineStats.dataPoints }}</p>
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+              <p class="text-xs text-gray-500">数据点数</p>
+              <p class="text-lg font-bold mt-1 text-gray-900">{{ klineStats.dataPoints }}</p>
             </div>
-            <div class="bg-white rounded-lg shadow p-4">
-              <p class="text-xs text-gray-600">区间收益</p>
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+              <p class="text-xs text-gray-500">区间收益</p>
               <p class="text-lg font-bold mt-1" :class="parseFloat(klineStats.totalReturn) >= 0 ? 'text-red-600' : 'text-green-600'">
                 {{ klineStats.totalReturn }}%
               </p>
             </div>
-            <div class="bg-white rounded-lg shadow p-4">
-              <p class="text-xs text-gray-600">最高价</p>
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+              <p class="text-xs text-gray-500">最高价</p>
               <p class="text-lg font-bold mt-1 text-red-600">{{ klineStats.high }}</p>
             </div>
-            <div class="bg-white rounded-lg shadow p-4">
-              <p class="text-xs text-gray-600">最低价</p>
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+              <p class="text-xs text-gray-500">最低价</p>
               <p class="text-lg font-bold mt-1 text-green-600">{{ klineStats.low }}</p>
             </div>
           </div>
 
-          <div class="bg-white rounded-lg shadow p-6">
+          <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
             <div class="flex justify-between items-center mb-4">
               <h3 class="text-lg font-semibold">K线图表 - {{ selectedSymbol }}</h3>
               <span v-if="klineStats" class="text-sm text-gray-600">{{ klineStats.dateRange }}</span>
@@ -383,8 +386,8 @@ watch(selectedSymbol, () => {
             </div>
           </div>
 
-          <div class="mt-6 bg-white rounded-lg shadow overflow-hidden">
-            <div class="px-6 py-4 border-b flex justify-between items-center">
+          <div class="mt-6 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
               <h3 class="text-lg font-semibold">数据明细</h3>
               <span class="text-sm text-gray-500">显示最近 20 条</span>
             </div>
@@ -436,10 +439,10 @@ watch(selectedSymbol, () => {
     <Teleport to="body">
       <div
         v-if="showFetchDialog"
-        class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+        class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
         @click.self="showFetchDialog = false"
       >
-        <div class="bg-white rounded-lg shadow-xl w-full max-w-md">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
           <div class="px-6 py-4 border-b flex justify-between items-center">
             <h2 class="text-xl font-semibold">获取K线数据</h2>
             <button
@@ -458,7 +461,7 @@ watch(selectedSymbol, () => {
               <input
                 v-model="fetchForm.symbol"
                 type="text"
-                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-gray-50 focus:bg-white transition-all"
                 placeholder="例如: 600000.SH"
               />
             </div>
@@ -468,7 +471,7 @@ watch(selectedSymbol, () => {
               <input
                 v-model="fetchForm.startDate"
                 type="date"
-                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-gray-50 focus:bg-white transition-all"
               />
             </div>
 
@@ -477,7 +480,7 @@ watch(selectedSymbol, () => {
               <input
                 v-model="fetchForm.endDate"
                 type="date"
-                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-gray-50 focus:bg-white transition-all"
               />
             </div>
           </div>
@@ -509,10 +512,10 @@ watch(selectedSymbol, () => {
     <Teleport to="body">
       <div
         v-if="showBatchFetchDialog"
-        class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+        class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
         @click.self="showBatchFetchDialog = false"
       >
-        <div class="bg-white rounded-lg shadow-xl w-full max-w-lg">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden">
           <div class="px-6 py-4 border-b flex justify-between items-center">
             <h2 class="text-xl font-semibold">批量获取K线数据</h2>
             <button
@@ -531,7 +534,7 @@ watch(selectedSymbol, () => {
               <textarea
                 v-model="batchFetchForm.symbols"
                 rows="4"
-                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 font-mono text-sm"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500 bg-gray-50 focus:bg-white font-mono text-sm transition-all"
                 placeholder="每行一个标的代码，或用逗号分隔&#10;例如：&#10;600000.SH&#10;600036.SH&#10;000001.SZ"
               ></textarea>
               <p class="text-xs text-gray-500 mt-1">支持每行一个或逗号分隔多个标的代码</p>
@@ -542,7 +545,7 @@ watch(selectedSymbol, () => {
               <input
                 v-model="batchFetchForm.startDate"
                 type="date"
-                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500 bg-gray-50 focus:bg-white transition-all"
               />
             </div>
 
@@ -551,7 +554,7 @@ watch(selectedSymbol, () => {
               <input
                 v-model="batchFetchForm.endDate"
                 type="date"
-                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500 bg-gray-50 focus:bg-white transition-all"
               />
             </div>
 
