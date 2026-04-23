@@ -2,12 +2,30 @@
 
 import json
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 
 import pandas as pd
 import typer
 
+from backend.models import Trade
+
 app = typer.Typer(name="quantix", help="量化回测平台")
+
+
+def _persist_trades(db, backtest_id: int, trades: list):
+    for trade in trades:
+        db_trade = Trade(
+            backtest_id=backtest_id,
+            symbol=trade["symbol"],
+            side=trade["side"],
+            price=Decimal(str(trade["price"])),
+            quantity=trade["quantity"],
+            timestamp=datetime.fromisoformat(trade["timestamp"]) if isinstance(trade["timestamp"], str) else trade["timestamp"],
+            commission=Decimal(str(trade["commission"])) if trade.get("commission") is not None else None,
+            pnl=Decimal(str(trade["pnl"])) if trade.get("pnl") is not None else None,
+        )
+        db.add(db_trade)
 
 
 def _parse_period(period_str: str) -> int:
@@ -415,6 +433,9 @@ def run_backtest_cmd(
             end_date=datetime.strptime(end_date, "%Y-%m-%d").date(),
             initial_capital=Decimal(str(initial_capital)),
             commission=Decimal(str(commission)),
+            slippage=Decimal(str(slippage)),
+            period=period,
+            adjust=adjust,
             status="running",
         )
         db.add(backtest)
@@ -427,6 +448,8 @@ def run_backtest_cmd(
         data_dict = get_market_data(symbol, start_dt, end_dt, period=period, adjust=adjust)
 
         if not data_dict or symbol not in data_dict:
+            backtest.status = "failed"
+            db.commit()
             typer.echo(f"无 {symbol} 的K线数据", err=True)
             raise typer.Exit(1)
 
@@ -454,6 +477,9 @@ def run_backtest_cmd(
         backtest.equity_curve = json.dumps(result["equity_curve"])
         db.commit()
 
+        _persist_trades(db, backtest.id, result["trades"])
+        db.commit()
+
         _print_backtest_result(result)
 
 
@@ -469,6 +495,9 @@ def run_backtest_file_cmd(
     period: str = typer.Option("1min", help="K线周期: 1min/5min/15min/30min/60min/120min/1D/1W/1M/1Q"),
     adjust: str = typer.Option("hfq", help="复权方式: none/qfq/hfq"),
     params: str = typer.Option("{}", help="策略参数 (JSON), 如 '{\"short_period\":10,\"long_period\":30}'"),
+    save: bool = typer.Option(False, "--save", help="保存回测结果到数据库"),
+    strategy_name: str = typer.Option("", "--strategy-name", help="保存时使用的策略名称，默认取文件名"),
+    strategy_id: int = typer.Option(0, "--strategy-id", help="关联已有策略 ID，与 --strategy-name 互斥"),
 ):
     """运行回测（直接使用策略文件，无需数据库）"""
     from backend.db import get_market_data
@@ -528,6 +557,66 @@ def run_backtest_file_cmd(
     result = engine.run()
 
     _print_backtest_result(result)
+
+    if save:
+        if result["status"] == "failed":
+            typer.echo("回测失败，不保存结果", err=True)
+            raise typer.Exit(1)
+
+        if strategy_id and strategy_name:
+            typer.echo("--strategy-id 和 --strategy-name 不能同时使用", err=True)
+            raise typer.Exit(1)
+
+        from backend.db import SessionLocal, init_db
+        from backend.models import Backtest, Strategy
+
+        init_db()
+
+        with SessionLocal() as db:
+            if strategy_id:
+                strategy = db.query(Strategy).filter(Strategy.id == strategy_id).first()
+                if not strategy:
+                    typer.echo(f"策略 ID {strategy_id} 不存在", err=True)
+                    raise typer.Exit(1)
+            else:
+                strategy_name = (strategy_name or strategy_file.stem)[:100]
+                strategy = db.query(Strategy).filter(
+                    Strategy.name == strategy_name,
+                    Strategy.code == strategy_code,
+                ).first()
+                if not strategy:
+                    strategy = Strategy(name=strategy_name, code=strategy_code)
+                    db.add(strategy)
+                    db.commit()
+                    db.refresh(strategy)
+
+            backtest = Backtest(
+                strategy_id=strategy.id,
+                symbol=symbol,
+                start_date=datetime.strptime(start_date, "%Y-%m-%d").date(),
+                end_date=datetime.strptime(end_date, "%Y-%m-%d").date(),
+                initial_capital=Decimal(str(initial_capital)),
+                commission=Decimal(str(commission)),
+                slippage=Decimal(str(slippage)),
+                period=period,
+                adjust=adjust,
+                status=result["status"],
+                total_return=Decimal(str(result["metrics"]["total_return"])),
+                annual_return=Decimal(str(result["metrics"]["annual_return"])),
+                sharpe_ratio=Decimal(str(result["metrics"]["sharpe_ratio"])),
+                max_drawdown=Decimal(str(result["metrics"]["max_drawdown"])),
+                win_rate=Decimal(str(result["metrics"]["win_rate"])),
+                equity_curve=json.dumps(result["equity_curve"]),
+            )
+            db.add(backtest)
+            db.commit()
+            db.refresh(backtest)
+
+            _persist_trades(db, backtest.id, result["trades"])
+            db.commit()
+            saved_backtest_id = backtest.id
+
+        typer.echo(f"回测结果已保存，ID: {saved_backtest_id}")
 
 
 @backtest_app.command("list")
