@@ -1,5 +1,6 @@
 """K线重采样模块"""
 
+import numpy as np
 import pandas as pd
 
 
@@ -18,6 +19,20 @@ VALID_PERIODS = (
     "1D", "1W", "1M", "1Q",
 )
 
+# 标准K线列（顺序）
+_KLINE_COLS = ["timestamp", "open", "high", "low", "close", "volume", "amount"]
+
+
+def _in_trading_hours(ts: pd.Series) -> pd.Series:
+    """判断时间序列是否落在 A 股交易时段内"""
+    tv = ts.dt.hour * 100 + ts.dt.minute
+    return ((tv >= 930) & (tv <= 1130)) | ((tv >= 1300) & (tv <= 1500))
+
+
+def _is_daily_data(ts: pd.Series) -> bool:
+    """判断数据是否已经是日线格式（所有时间戳时间部分相同）"""
+    return len(ts.dt.time.unique()) <= 1
+
 
 def _resample_60min(df: pd.DataFrame) -> pd.DataFrame:
     """按 A 股交易时段聚合为 60min K 线。
@@ -27,12 +42,7 @@ def _resample_60min(df: pd.DataFrame) -> pd.DataFrame:
       午盘：13:00-13:59, 14:00-15:00
     时间戳使用结束时间（与券商一致）：10:30, 11:30, 14:00, 15:00
     """
-    df = df.copy()
-    # 过滤掉非交易时间的行
-    hour = df["timestamp"].dt.hour
-    minute = df["timestamp"].dt.minute
-    time_val = hour * 100 + minute
-    df = df[((time_val >= 930) & (time_val <= 1130)) | ((time_val >= 1300) & (time_val <= 1500))]
+    df = df[_in_trading_hours(df["timestamp"])].copy()
     df = df.sort_values("timestamp").reset_index(drop=True)
 
     df["date"] = df["timestamp"].dt.date
@@ -42,19 +52,16 @@ def _resample_60min(df: pd.DataFrame) -> pd.DataFrame:
     # 午盘 13:00-15:00 = 121 根 1min bar → 60 + 61
     time_val = df["timestamp"].dt.hour * 100 + df["timestamp"].dt.minute
 
-    def assign_bar_id(tv):
-        if 930 <= tv < 1030:
-            return 0   # 9:30-10:29 (60 bars)
-        elif 1030 <= tv <= 1130:
-            return 1   # 10:30-11:30 (61 bars)
-        elif 1300 <= tv < 1400:
-            return 2   # 13:00-13:59 (60 bars)
-        elif 1400 <= tv <= 1500:
-            return 3   # 14:00-15:00 (61 bars)
-        else:
-            return -1
-
-    df["_bar_id"] = time_val.apply(assign_bar_id)
+    df["_bar_id"] = np.select(
+        [
+            time_val.between(930, 1029),
+            time_val.between(1030, 1130),
+            time_val.between(1300, 1359),
+            time_val.between(1400, 1500),
+        ],
+        [0, 1, 2, 3],
+        default=-1,
+    )
 
     result = df.groupby(["date", "_bar_id"], sort=False).agg({
         "open": "first",
@@ -70,8 +77,7 @@ def _resample_60min(df: pd.DataFrame) -> pd.DataFrame:
     result["timestamp"] = result["timestamp"] + pd.Timedelta(hours=1)
 
     result = result.sort_values("timestamp").reset_index(drop=True)
-    cols = ["timestamp", "open", "high", "low", "close", "volume", "amount"]
-    return result[cols]
+    return result[_KLINE_COLS]
 
 
 def _resample_by_session(df: pd.DataFrame) -> pd.DataFrame:
@@ -79,20 +85,13 @@ def _resample_by_session(df: pd.DataFrame) -> pd.DataFrame:
 
     早盘 9:30-11:30 和午盘 13:00-15:00 各产生一根 K 线。
     """
-    df = df.copy()
-    # 过滤掉非交易时间的行（如日线汇总数据 00:00:00）
-    hour = df["timestamp"].dt.hour
-    minute = df["timestamp"].dt.minute
-    time_val = hour * 100 + minute
-    df = df[((time_val >= 930) & (time_val <= 1130)) | ((time_val >= 1300) & (time_val <= 1500))]
+    df = df[_in_trading_hours(df["timestamp"])].copy()
+    df = df.sort_values("timestamp").reset_index(drop=True)
 
     df["date"] = df["timestamp"].dt.date
-    df["session"] = hour * 100 + df["timestamp"].dt.minute  # HHMM int
 
     # 标记早盘 (< 12:00) 和午盘 (>= 12:00)
-    df["session_id"] = df["session"].apply(
-        lambda t: "morning" if t < 1200 else "afternoon"
-    )
+    df["session_id"] = np.where(df["timestamp"].dt.hour < 12, "morning", "afternoon")
 
     result = (
         df.groupby(["date", "session_id"], sort=False)
@@ -108,19 +107,18 @@ def _resample_by_session(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index(drop=True)
     )
 
-    # Ensure chronological order
     result = result.sort_values("timestamp").reset_index(drop=True)
-
-    # 保留列顺序，去掉临时列
-    cols = ["timestamp", "open", "high", "low", "close", "volume", "amount"]
-    return result[cols]
+    return result[_KLINE_COLS]
 
 
 def _resample_daily(df: pd.DataFrame) -> pd.DataFrame:
-    """日线聚合。过滤非交易时间行后按日期分组。"""
-    df = df.copy()
-    time_val = df["timestamp"].dt.hour * 100 + df["timestamp"].dt.minute
-    df = df[((time_val >= 930) & (time_val <= 1130)) | ((time_val >= 1300) & (time_val <= 1500))]
+    """日线聚合。若数据已经是日线格式则直接返回，否则从分钟线聚合。"""
+    if _is_daily_data(df["timestamp"]):
+        return df[[c for c in _KLINE_COLS if c in df.columns]].copy()
+
+    df = df[_in_trading_hours(df["timestamp"])].copy()
+    if df.empty:
+        return pd.DataFrame(columns=_KLINE_COLS)
 
     df["date"] = df["timestamp"].dt.date
     result = df.groupby("date").agg({
@@ -135,14 +133,15 @@ def _resample_daily(df: pd.DataFrame) -> pd.DataFrame:
 
     result["timestamp"] = result["timestamp"].dt.normalize()
 
-    return result.sort_values("timestamp").reset_index(drop=True)[
-        ["timestamp", "open", "high", "low", "close", "volume", "amount"]
-    ]
+    return result.sort_values("timestamp").reset_index(drop=True)[_KLINE_COLS]
 
 
 def _resample_weekly(df: pd.DataFrame) -> pd.DataFrame:
     """周线聚合。基于交易日数据，按自然周分组。"""
     daily = _resample_daily(df)
+    if daily.empty:
+        return daily
+
     daily["_week_key"] = daily["timestamp"].dt.strftime("%Y-W%V")
 
     result = daily.groupby("_week_key").agg({
@@ -156,15 +155,17 @@ def _resample_weekly(df: pd.DataFrame) -> pd.DataFrame:
     }).reset_index(drop=True)
 
     ts = result["timestamp"]
+    # 将时间戳对齐到当周周五（dayofweek=4）
     result["timestamp"] = (ts + pd.to_timedelta((4 - ts.dt.dayofweek) % 7, unit="D")).dt.normalize()
-    return result.sort_values("timestamp").reset_index(drop=True)[
-        ["timestamp", "open", "high", "low", "close", "volume", "amount"]
-    ]
+    return result.sort_values("timestamp").reset_index(drop=True)[_KLINE_COLS]
 
 
 def _resample_monthly(df: pd.DataFrame) -> pd.DataFrame:
     """月线聚合。基于交易日数据，按年-月分组。"""
     daily = _resample_daily(df)
+    if daily.empty:
+        return daily
+
     daily["_month_key"] = daily["timestamp"].dt.strftime("%Y-%m")
 
     result = daily.groupby("_month_key", as_index=False).agg({
@@ -178,14 +179,15 @@ def _resample_monthly(df: pd.DataFrame) -> pd.DataFrame:
 
     result["timestamp"] = result["_month_key"].apply(lambda x: pd.Timestamp(x) + pd.offsets.MonthEnd(0))
     result = result.drop(columns="_month_key")
-    return result.sort_values("timestamp").reset_index(drop=True)[
-        ["timestamp", "open", "high", "low", "close", "volume", "amount"]
-    ]
+    return result.sort_values("timestamp").reset_index(drop=True)[_KLINE_COLS]
 
 
 def _resample_quarterly(df: pd.DataFrame) -> pd.DataFrame:
     """季线聚合。基于交易日数据，按年-季分组。"""
     daily = _resample_daily(df)
+    if daily.empty:
+        return daily
+
     daily["_quarter_key"] = daily["timestamp"].dt.to_period("Q").astype(str)
 
     result = daily.groupby("_quarter_key", as_index=False).agg({
@@ -199,9 +201,7 @@ def _resample_quarterly(df: pd.DataFrame) -> pd.DataFrame:
 
     result["timestamp"] = result["_quarter_key"].apply(lambda x: pd.Period(x).end_time.normalize())
     result = result.drop(columns="_quarter_key")
-    return result.sort_values("timestamp").reset_index(drop=True)[
-        ["timestamp", "open", "high", "low", "close", "volume", "amount"]
-    ]
+    return result.sort_values("timestamp").reset_index(drop=True)[_KLINE_COLS]
 
 
 def resample_kline(kline_df: pd.DataFrame, period: str) -> pd.DataFrame:
@@ -215,16 +215,12 @@ def resample_kline(kline_df: pd.DataFrame, period: str) -> pd.DataFrame:
     Returns:
         重采样后的K线数据
     """
-    if len(kline_df) == 0:
+    if len(kline_df) == 0 or period == "1min":
         return kline_df.copy()
 
-    # 如果是 1min，直接返回
-    if period == "1min":
-        return kline_df.copy()
-
-    # 确保 timestamp 是 datetime 类型
-    df = kline_df.copy()
+    df = kline_df
     if not pd.api.types.is_datetime64_any_dtype(df['timestamp']):
+        df = kline_df.copy()
         df['timestamp'] = pd.to_datetime(df['timestamp'])
 
     df = df.sort_values('timestamp').reset_index(drop=True)
