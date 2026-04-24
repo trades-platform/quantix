@@ -216,6 +216,7 @@ class BacktestEngine:
 
         # 为每个标的建立行索引追踪
         row_indices = {symbol: 0 for symbol in resampled_data}
+        last_prices: dict[str, float] = {}
 
         # 为每个标的创建持久的指标计算器（避免每轮重建）
         indicator_objects: dict[str, SymbolIndicators] = {}
@@ -276,19 +277,38 @@ class BacktestEngine:
             pending_orders = orders
 
             # --- 步骤 5：更新组合价值 ---
-            prices = {sym: bar.close for sym, bar in current_bars.items()}
-            portfolio.update_value(prices)
+            for sym, bar in current_bars.items():
+                last_prices[sym] = bar.close
+            portfolio.update_value(last_prices)
             context.portfolio_value = portfolio.equity_curve[-1]
 
         # 计算性能指标
         bars_per_year = _bars_per_year(self.period)
         metrics = calculate_metrics(portfolio.equity_curve, portfolio.trades, bars_per_year=bars_per_year)
 
+        open_positions = []
+        for symbol, quantity in portfolio.positions.items():
+            last_price = last_prices.get(symbol, 0.0)
+            avg_cost = portfolio._avg_cost.get(symbol, 0.0)
+            market_value = quantity * last_price
+            cost_basis = quantity * avg_cost
+            unrealized_pnl = market_value - cost_basis
+            open_positions.append({
+                "symbol": symbol,
+                "quantity": quantity,
+                "avg_cost": avg_cost,
+                "last_price": last_price,
+                "market_value": market_value,
+                "cost_basis": cost_basis,
+                "unrealized_pnl": unrealized_pnl,
+            })
+
         return {
             "status": "completed",
             "metrics": metrics,
             "equity_curve": portfolio.equity_curve,
             "trades": portfolio.trades,
+            "open_positions": open_positions,
             "final_value": portfolio.equity_curve[-1] if portfolio.equity_curve else self.initial_capital,
         }
 

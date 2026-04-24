@@ -374,7 +374,40 @@ def _print_backtest_result(result: dict):
     typer.echo(f"胜率: {result['metrics']['win_rate']:.2%}")
     typer.echo(f"交易次数: {len(result['trades'])}")
 
-    if result["trades"]:
+    trades = result["trades"]
+    open_round_trips: dict[str, dict] = {}
+    realized_pnl = 0.0
+    for trade in trades:
+        symbol = trade["symbol"]
+        quantity = trade["quantity"]
+        price = trade["price"]
+        commission = trade.get("commission", 0.0) or 0.0
+
+        if trade["side"] == "buy":
+            open_round_trips[symbol] = {
+                "quantity": quantity,
+                "cost": price * quantity,
+                "buy_commission": commission,
+            }
+        elif symbol in open_round_trips:
+            position = open_round_trips.pop(symbol)
+            gross_pnl = price * quantity - position["cost"]
+            realized_pnl += gross_pnl - position["buy_commission"] - commission
+
+    if realized_pnl or trades:
+        typer.echo(f"已平仓净收益: {realized_pnl:.2f}")
+
+    open_positions = result.get("open_positions", [])
+    if open_positions:
+        unrealized_pnl = sum(item["unrealized_pnl"] for item in open_positions)
+        typer.echo(f"未平仓浮盈亏: {unrealized_pnl:.2f}")
+        for item in open_positions:
+            typer.echo(
+                f"  未平仓 {item['symbol']}: qty={item['quantity']} avg_cost={item['avg_cost']:.4f} "
+                f"last={item['last_price']:.4f} 浮盈亏={item['unrealized_pnl']:.2f}"
+            )
+
+    if trades:
         table = PrettyTable()
         table.field_names = ["时间", "方向", "标的", "价格", "数量", "手续费", "盈亏"]
         table.align["时间"] = "l"
@@ -481,7 +514,7 @@ def run_backtest_cmd(
 @backtest_app.command("run-file")
 def run_backtest_file_cmd(
     strategy_file: Path = typer.Argument(..., help="策略文件路径 (.py)", exists=True),
-    symbol: str = typer.Argument(..., help="标的代码"),
+    symbol: str = typer.Argument(..., help="标的代码，多个用逗号分隔，如 510300.SH,510500.SH"),
     start_date: str = typer.Argument(..., help="开始日期 YYYY-MM-DD"),
     end_date: str = typer.Argument(..., help="结束日期 YYYY-MM-DD"),
     initial_capital: float = typer.Option(1000000.0, help="初始资金"),
@@ -493,6 +526,10 @@ def run_backtest_file_cmd(
     save: bool = typer.Option(False, "--save", help="保存回测结果到数据库"),
     strategy_name: str = typer.Option("", "--strategy-name", help="保存时使用的策略名称，默认取文件名"),
     strategy_id: int = typer.Option(0, "--strategy-id", help="关联已有策略 ID，与 --strategy-name 互斥"),
+    plot: bool = typer.Option(False, "--plot", help="生成交互式图表"),
+    plot_backend: str = typer.Option("pyecharts", help="图表引擎: pyecharts, lightweight"),
+    plot_output: str = typer.Option("backtest_chart.html", "--plot-output", help="输出 HTML 文件路径"),
+    plot_show: bool = typer.Option(False, "--plot-show", help="在桌面窗口中打开图表"),
 ):
     """运行回测（直接使用策略文件，无需数据库）"""
     from backend.db import get_market_data
@@ -514,13 +551,20 @@ def run_backtest_file_cmd(
         typer.echo(f"策略代码无效: {e}", err=True)
         raise typer.Exit(1)
 
+    # 解析标的列表
+    symbols = [s.strip() for s in symbol.split(",") if s.strip()]
+    if not symbols:
+        typer.echo("标的代码不能为空", err=True)
+        raise typer.Exit(1)
+
     # 查询行情数据
     start_dt = datetime.strptime(start_date, "%Y-%m-%d")
     end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-    data_dict = get_market_data(symbol, start_dt, end_dt, period=period, adjust=adjust)
+    data_dict = get_market_data(symbols, start_dt, end_dt, period=period, adjust=adjust)
 
-    if not data_dict or symbol not in data_dict:
-        typer.echo(f"无 {symbol} 的K线数据", err=True)
+    missing = [s for s in symbols if s not in data_dict or data_dict[s].empty]
+    if missing:
+        typer.echo(f"无以下标的的K线数据: {', '.join(missing)}", err=True)
         raise typer.Exit(1)
 
     # 解析策略参数
@@ -530,19 +574,19 @@ def run_backtest_file_cmd(
         typer.echo(f"策略参数 JSON 解析失败: {e}", err=True)
         raise typer.Exit(1)
 
-    kline_data = data_dict[symbol]
-    typer.echo(f"开始回测: {symbol} ({start_date} ~ {end_date})")
+    typer.echo(f"开始回测: {', '.join(symbols)} ({start_date} ~ {end_date})")
     typer.echo(f"  策略文件: {strategy_file}")
     typer.echo(f"  K线周期: {period}  复权: {adjust}")
     if strategy_params:
         typer.echo(f"  策略参数: {strategy_params}")
-    typer.echo(f"  数据量: {len(kline_data)} bars")
+    for sym in symbols:
+        typer.echo(f"  {sym} 数据量: {len(data_dict[sym])} bars")
 
     # 执行回测
     engine = BacktestEngine(
         strategy_code=strategy_code,
-        data=kline_data,
-        symbol=symbol,
+        data=data_dict,
+        symbol=symbols,
         initial_capital=initial_capital,
         commission=commission,
         slippage=slippage,
@@ -553,7 +597,32 @@ def run_backtest_file_cmd(
 
     _print_backtest_result(result)
 
+    if plot:
+        from backend.plotting import ChartBuilder, LayerSpec, PlotConfig
+
+        plot_symbol = symbols[0]
+        kline_data = data_dict[plot_symbol]
+        config = PlotConfig(
+            title=f"{plot_symbol} Backtest",
+            layers=[
+                LayerSpec(indicator="ma", name="MA(5)", params={"period": 5}, color="#F44336"),
+                LayerSpec(indicator="ma", name="MA(20)", params={"period": 20}, color="#2196F3"),
+                LayerSpec(indicator="volume", name="Volume", pane="volume"),
+            ],
+            show_trades=True,
+            show_equity_curve=True,
+            show_drawdown=True,
+        )
+        builder = ChartBuilder(result, kline_data, config=config)
+        render_result = builder.render(renderer_name=plot_backend, output=plot_output, show=plot_show)
+        if render_result.filepath:
+            typer.echo(f"图表已保存: {render_result.filepath}")
+
     if save:
+        if len(symbols) > 1:
+            typer.echo("暂不支持保存多标的回测结果到数据库", err=True)
+            raise typer.Exit(1)
+
         if result["status"] == "failed":
             typer.echo("回测失败，不保存结果", err=True)
             raise typer.Exit(1)
@@ -586,7 +655,7 @@ def run_backtest_file_cmd(
             try:
                 backtest = Backtest(
                     strategy_id=strategy.id,
-                    symbol=symbol,
+                    symbol=symbols[0],
                     start_date=datetime.strptime(start_date, "%Y-%m-%d").date(),
                     end_date=datetime.strptime(end_date, "%Y-%m-%d").date(),
                     initial_capital=Decimal(str(initial_capital)),
