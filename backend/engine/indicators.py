@@ -18,7 +18,7 @@ class SymbolIndicators:
             data: 完整历史K线数据，包含列: timestamp, open, high, low, close, volume
         """
         self._data = data
-        self._current_idx = len(data)
+        self._current_idx = 0
 
     def set_current_idx(self, idx: int):
         """设置当前可见数据的截止行索引（不含 idx）"""
@@ -165,6 +165,55 @@ class SymbolIndicators:
         atr = tr.tail(period).mean()
 
         return float(atr)
+
+    def roc(self, period: int) -> float:
+        """变动率指标 (Rate of Change / Momentum)
+
+        Args:
+            period: 周期
+
+        Returns:
+            ROC 值 (当前价相对 N 周期前收盘价的变化率)，数据不足时返回 0.0
+        """
+        data = self._visible
+        if len(data) < period + 1:
+            return 0.0
+
+        prev_close = float(data["close"].iloc[-(period + 1)])
+        current_close = float(data["close"].iloc[-1])
+        if prev_close == 0:
+            return 0.0
+
+        return (current_close - prev_close) / prev_close
+
+    def std(self, period: int) -> float:
+        """收盘价标准差
+
+        Args:
+            period: 周期
+
+        Returns:
+            标准差，数据不足时返回 0.0
+        """
+        data = self._visible
+        if len(data) < period:
+            return 0.0
+        return float(data["close"].tail(period).std(ddof=0))
+
+    def history(self, field: str, period: int) -> list[float]:
+        """获取最近 N 个字段值
+
+        Args:
+            field: 字段名，如 "close", "high", "low", "volume"
+            period: 周期
+
+        Returns:
+            最近 N 个值的列表，数据不足时返回全部可用值
+        """
+        data = self._visible
+        if len(data) == 0:
+            return []
+        return data[field].tail(period).tolist()
 
     def kdj(self, n: int = 9, m1: int = 3, m2: int = 3) -> tuple[float, float, float]:
         """随机指标 (KDJ)
