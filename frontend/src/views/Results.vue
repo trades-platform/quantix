@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { backtestApi } from '../api'
+import { backtestApi, default as api } from '../api'
 import { useBacktestStore } from '../stores/backtest'
 import { useNotificationStore } from '../stores/notification'
 import { storeToRefs } from 'pinia'
@@ -15,6 +15,7 @@ import {
   GridComponent,
 } from 'echarts/components'
 import VChart from 'vue-echarts'
+import KlineChart from '../components/KlineChart.vue'
 
 use([
   CanvasRenderer,
@@ -238,6 +239,7 @@ const fetchBacktest = async () => {
   try {
     await backtestStore.fetchBacktest(backtestApi, backtestId.value)
     await backtestStore.fetchTrades(backtestApi, backtestId.value)
+    await fetchChartData(backtestId.value)
   } catch (error) {
     notificationStore.error('获取回测结果失败')
   }
@@ -258,6 +260,30 @@ const formatCurrency = (value) => {
 
 const runNewBacktest = () => {
   router.push('/backtest')
+}
+
+// --- K-line chart data from chart-data API ---
+const chartData = ref(null)
+const chartLoading = ref(false)
+const chartError = ref(null)
+
+const chartOhlcv = computed(() => chartData.value?.ohlcv || [])
+const chartIndicators = computed(() => chartData.value?.indicators || [])
+const chartTrades = computed(() => chartData.value?.trades || [])
+
+const fetchChartData = async (id) => {
+  if (!id) return
+  chartLoading.value = true
+  chartError.value = null
+  try {
+    const response = await api.get(`/backtests/${id}/chart-data`)
+    chartData.value = response.data
+  } catch (err) {
+    console.error('Failed to fetch chart data:', err)
+    chartError.value = err.response?.data?.detail || '获取图表数据失败'
+  } finally {
+    chartLoading.value = false
+  }
 }
 
 watch(backtestId, (newId) => {
@@ -373,6 +399,29 @@ onMounted(() => {
           <p class="text-sm font-medium mt-2 text-gray-700">
             {{ new Date(currentBacktest.created_at).toLocaleString('zh-CN') }}
           </p>
+        </div>
+      </div>
+
+      <div class="mt-8">
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <h2 class="text-lg font-semibold mb-4">K线图表</h2>
+          <div v-if="chartLoading" class="text-center py-8">
+            <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+            <p class="mt-2 text-gray-500 text-sm">加载图表数据...</p>
+          </div>
+          <div v-else-if="chartError" class="text-center py-8 text-gray-500 text-sm">
+            {{ chartError }}
+          </div>
+          <KlineChart
+            v-else-if="chartOhlcv.length > 0"
+            :data="chartOhlcv"
+            :indicators="chartIndicators"
+            :trades="chartTrades"
+            height="560px"
+          />
+          <div v-else class="text-center py-8 text-gray-500 text-sm">
+            暂无K线图表数据
+          </div>
         </div>
       </div>
 

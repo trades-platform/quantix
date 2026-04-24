@@ -24,6 +24,10 @@ dev = [
     "ruff>=0.9",
 ]
 
+[project.optional-dependencies]
+plotting-pyecharts = ["pyecharts>=2.0"]
+plotting-lightweight = ["lightweight-charts>=2.1", "pywebview>=5.0"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

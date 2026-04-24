@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.backtests import router as backtests_router
+from backend.api.charts import router as charts_router
 from backend.api.data import router as data_router
 from backend.api.strategies import router as strategies_router
 
@@ -27,4 +28,5 @@ def health_check():
 # 注册子路由
 api_router.include_router(strategies_router)
 api_router.include_router(backtests_router)
+api_router.include_router(charts_router)
 api_router.include_router(data_router)
