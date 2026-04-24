@@ -66,6 +66,41 @@ def handle_bar(context):
     assert "final_value" in result
 
 
+def test_backtest_engine_resamples_raw_minute_data():
+    """传入原始分钟线时，应按 period 先重采样再回放。"""
+    minute_data = pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-02 09:30", periods=10, freq="min"),
+        "open": [10.0 + i * 0.01 for i in range(10)],
+        "high": [10.2 + i * 0.01 for i in range(10)],
+        "low": [9.8 + i * 0.01 for i in range(10)],
+        "close": [10.1 + i * 0.01 for i in range(10)],
+        "volume": [1000000 + i * 1000 for i in range(10)],
+        "amount": [10000000 + i * 10000 for i in range(10)],
+    })
+
+    strategy_code = """
+def initialize(context):
+    pass
+
+def handle_bar(context):
+    return []
+""".strip()
+
+    engine = BacktestEngine(
+        strategy_code=strategy_code,
+        data=minute_data,
+        symbol="600000.SH",
+        initial_capital=1000000,
+        period="5min",
+    )
+
+    result = engine.run()
+
+    assert result["status"] == "completed"
+    assert len(result["equity_curve"]) == 3  # 初始值 + 2 根 5min bar
+    assert len(result["trades"]) == 0
+
+
 def test_backtest_engine_empty_data():
     """测试空数据处理
 

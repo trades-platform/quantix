@@ -3,6 +3,9 @@
 import pandas as pd
 
 from backend.engine.context import Bar, Context
+from backend.engine.executor import StrategyExecutor
+from backend.engine.metrics import calculate_metrics
+from backend.engine.resample import resample_kline
 
 
 # K线周期 → 每年 bar 数量（A股：252 交易日，每天 4 小时 = 240 分钟）
@@ -23,8 +26,74 @@ _BARS_PER_YEAR: dict[str, int] = {
 def _bars_per_year(period: str) -> int:
     """根据 K 线周期返回每年的 bar 数量"""
     return _BARS_PER_YEAR.get(period, 252)
-from backend.engine.executor import StrategyExecutor
-from backend.engine.metrics import calculate_metrics
+
+
+_INTRADAY_PERIOD_MINUTES: dict[str, int] = {
+    "1min": 1,
+    "5min": 5,
+    "15min": 15,
+    "30min": 30,
+    "60min": 60,
+    "120min": 120,
+}
+
+
+def _same_day_minute_deltas(ts: pd.Series) -> pd.Series:
+    """返回同一交易日内相邻 bar 的分钟间隔。"""
+    if len(ts) < 2:
+        return pd.Series(dtype="float64")
+
+    deltas = ts.diff().dt.total_seconds().div(60)
+    same_day = ts.dt.normalize().eq(ts.shift().dt.normalize())
+    return deltas[same_day & deltas.gt(0)]
+
+
+def _needs_resample(df: pd.DataFrame, target_period: str) -> bool:
+    """仅在输入数据明显比目标周期更细时重采样，避免对已聚合数据二次重采样。"""
+    if df.empty or target_period == "1min":
+        return False
+
+    ts = df["timestamp"]
+    if target_period in _INTRADAY_PERIOD_MINUTES:
+        intraday_deltas = _same_day_minute_deltas(ts)
+        if not intraday_deltas.empty and intraday_deltas.min() < _INTRADAY_PERIOD_MINUTES[target_period]:
+            return True
+
+        bars_per_day = ts.dt.normalize().value_counts()
+        max_bars_per_day = int(bars_per_day.max()) if not bars_per_day.empty else 0
+        return max_bars_per_day > _BARS_PER_YEAR[target_period] // 252
+
+    bars_per_day = ts.dt.normalize().value_counts()
+    max_bars_per_day = int(bars_per_day.max()) if not bars_per_day.empty else 0
+    if max_bars_per_day > 1:
+        return True
+
+    if target_period == "1D":
+        return False
+    if target_period == "1W":
+        return ts.dt.strftime("%Y-W%V").nunique() < len(ts)
+    if target_period == "1M":
+        return ts.dt.to_period("M").nunique() < len(ts)
+    if target_period == "1Q":
+        return ts.dt.to_period("Q").nunique() < len(ts)
+    return False
+
+
+def _prepare_kline_data(df: pd.DataFrame, target_period: str) -> pd.DataFrame:
+    """规范化输入 K 线，并在必要时按目标周期重采样。"""
+    prepared = df.copy()
+    if not pd.api.types.is_datetime64_any_dtype(prepared["timestamp"]):
+        prepared["timestamp"] = pd.to_datetime(prepared["timestamp"])
+
+    prepared = prepared.sort_values("timestamp").reset_index(drop=True)
+
+    if _needs_resample(prepared, target_period):
+        if "amount" not in prepared.columns:
+            prepared["amount"] = prepared["close"] * prepared["volume"]
+        prepared = resample_kline(prepared, target_period)
+        prepared = prepared.sort_values("timestamp").reset_index(drop=True)
+
+    return prepared
 
 
 class Portfolio:
@@ -170,20 +239,15 @@ class BacktestEngine:
         executor = StrategyExecutor(self.strategy_code)
         executor.load()
 
-        # 重采样数据 (如果需要)
-        from backend.engine.resample import resample_kline
         from backend.engine.indicators import SymbolIndicators
 
-        resampled_data = {}
+        prepared_data = {}
         for symbol, df in self.data.items():
             if len(df) == 0:
                 continue
-            if self.period != "1min":
-                resampled_data[symbol] = resample_kline(df, self.period)
-            else:
-                resampled_data[symbol] = df
+            prepared_data[symbol] = _prepare_kline_data(df, self.period)
 
-        if not resampled_data:
+        if not prepared_data:
             return self._empty_result()
 
         # 创建上下文
@@ -201,26 +265,19 @@ class BacktestEngine:
         # 初始化策略
         executor.initialize(context)
 
-        # 预处理：确保 timestamp 列为 datetime 类型并排序
-        for symbol in resampled_data:
-            df = resampled_data[symbol]
-            if not pd.api.types.is_datetime64_any_dtype(df["timestamp"]):
-                df["timestamp"] = pd.to_datetime(df["timestamp"])
-            resampled_data[symbol] = df.sort_values("timestamp").reset_index(drop=True)
-
         # 收集所有时间戳并排序
         all_timestamps = set()
-        for df in resampled_data.values():
+        for df in prepared_data.values():
             all_timestamps.update(df["timestamp"].tolist())
         sorted_timestamps = sorted(all_timestamps)
 
         # 为每个标的建立行索引追踪
-        row_indices = {symbol: 0 for symbol in resampled_data}
+        row_indices = {symbol: 0 for symbol in prepared_data}
         last_prices: dict[str, float] = {}
 
         # 为每个标的创建持久的指标计算器（避免每轮重建）
         indicator_objects: dict[str, SymbolIndicators] = {}
-        for symbol, df in resampled_data.items():
+        for symbol, df in prepared_data.items():
             indicator_objects[symbol] = SymbolIndicators(df)
 
         # 待执行订单队列（上一根 bar 生成的信号，在当前 bar 开盘执行）
@@ -230,7 +287,7 @@ class BacktestEngine:
         for ts in sorted_timestamps:
             # 为每个标的构建当前 Bar
             current_bars = {}
-            for symbol, df in resampled_data.items():
+            for symbol, df in prepared_data.items():
                 idx = row_indices[symbol]
                 if idx < len(df) and df["timestamp"].iloc[idx] == ts:
                     row = df.iloc[idx]
