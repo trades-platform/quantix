@@ -57,6 +57,26 @@ class SymbolIndicators:
             return 0.0
         return float(data["close"].ewm(span=period, adjust=False).mean().iloc[-1])
 
+    def ma_angle(self, period: int, lookback: int = 1, scale: float = 100.0) -> float:
+        """均线角度
+
+        基于均线在 lookback 个 bar 内的相对变化率，通过 arctan 压缩到 -90~90 度。
+        scale 越大，对同样涨跌幅给出的角度越大。
+        """
+        data = self._visible
+        required = period + lookback
+        if len(data) < required:
+            return 0.0
+
+        ma_series = data["close"].rolling(window=period).mean()
+        current_ma = float(ma_series.iloc[-1])
+        prev_ma = float(ma_series.iloc[-(lookback + 1)])
+        if prev_ma == 0:
+            return 0.0
+
+        slope = ((current_ma - prev_ma) / prev_ma) / lookback
+        return float(np.degrees(np.arctan(slope * scale)))
+
     def macd(self, fast: int = 12, slow: int = 26, signal: int = 9) -> tuple[float, float, float]:
         """MACD 指标
 

@@ -51,6 +51,15 @@ def test_ema(price_data):
     assert ema12 != 0.0
 
 
+def test_ma_angle(price_data):
+    """MA angle 返回 -90 到 90 之间的角度"""
+    ind = SymbolIndicators(price_data)
+    ind.set_current_idx(len(price_data))
+    angle = ind.ma_angle(5)
+    assert isinstance(angle, float)
+    assert -90 < angle < 90
+
+
 def test_macd(price_data):
     """MACD 返回三元组"""
     ind = SymbolIndicators(price_data)
