@@ -123,6 +123,25 @@ export const mockSymbols = [
   { symbol: '300750.SZ', name: '宁德时代', data_type: 'stock', row_count: 850, latest_timestamp: '2024-04-15T15:00:00Z' }
 ]
 
+export const mockSymbolPools = [
+  {
+    id: 1,
+    name: 'etf_core',
+    description: '核心宽基 ETF 组合',
+    symbols: ['588000.SH', '159682.SZ'],
+    created_at: '2024-04-15T15:00:00Z',
+    updated_at: '2024-04-15T15:00:00Z'
+  },
+  {
+    id: 2,
+    name: 'bank_bluechips',
+    description: '银行龙头组合',
+    symbols: ['600000.SH', '600036.SH', '000001.SZ'],
+    created_at: '2024-04-16T15:00:00Z',
+    updated_at: '2024-04-16T15:00:00Z'
+  }
+]
+
 export const generateMockKlineData = (symbol = '600000.SH', days = 100) => {
   const data = []
   let price = 10 + Math.random() * 10

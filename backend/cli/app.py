@@ -47,9 +47,50 @@ def _parse_period(period_str: str) -> int:
     return period_map[period_str]
 
 
+def _resolve_target_symbols(raw_targets: str | list[str]) -> tuple[list[str], str]:
+    from backend.db import SessionLocal, get_display_target, resolve_symbol_targets
+
+    try:
+        display_target = get_display_target(raw_targets)
+        with SessionLocal() as db:
+            symbols = resolve_symbol_targets(db, raw_targets)
+        return symbols, display_target
+    except (LookupError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1)
+
+
+def _fetch_symbols_from_provider(
+    symbols: list[str],
+    period_int: int,
+    start_date: str | None,
+    end_date: str | None,
+    increment: bool,
+) -> tuple[list[dict], list[dict]]:
+    from backend.data import fetch_kline as data_fetch_kline
+
+    success: list[dict] = []
+    failed: list[dict] = []
+
+    for i, symbol in enumerate(symbols, 1):
+        typer.echo(f"[{i}/{len(symbols)}] 导入 {symbol}...")
+        try:
+            count = data_fetch_kline(symbol, period_int, start_date, end_date, increment)
+            success.append({"symbol": symbol, "count": count})
+        except Exception as exc:
+            failed.append({"symbol": symbol, "error": str(exc)})
+            typer.echo(f"  失败: {exc}", err=True)
+
+    return success, failed
+
+
 # 数据管理子命令
 data_app = typer.Typer(name="data", help="数据管理")
 app.add_typer(data_app, name="data")
+
+# 标的池子命令
+pool_app = typer.Typer(name="pool", help="标的池管理")
+app.add_typer(pool_app, name="pool")
 
 
 @app.command()
@@ -119,47 +160,49 @@ def show_kline_cmd(
     """显示K线数据"""
     from backend.db.kline import _query_kline
 
+    symbols, display_target = _resolve_target_symbols(symbol)
+    if len(symbols) != 1:
+        typer.echo(f"data show 仅支持单标的，当前 {display_target} 解析为 {', '.join(symbols)}", err=True)
+        raise typer.Exit(1)
+
+    target_symbol = symbols[0]
     start_dt = datetime.strptime(start_date, "%Y-%m-%d") if start_date else None
     end_dt = datetime.strptime(end_date, "%Y-%m-%d") if end_date else None
 
-    data = _query_kline(symbol, start_dt, end_dt)
+    data = _query_kline(target_symbol, start_dt, end_dt)
 
     if len(data) == 0:
-        typer.echo(f"无 {symbol} 的数据")
+        typer.echo(f"无 {target_symbol} 的数据")
         return
 
-    typer.echo(f"\n{symbol} K线数据 (共 {len(data)} 条):\n")
+    typer.echo(f"\n{target_symbol} K线数据 (共 {len(data)} 条):\n")
     typer.echo(data.head(limit).to_string(index=False))
 
 
 @data_app.command("fetch")
 def fetch_kline_cmd(
-    symbol: str = typer.Argument(..., help="标的代码，如 600000.SH"),
+    symbol: str = typer.Argument(..., help="标的代码或 @标的池，如 600000.SH / @etf_core"),
     period: str = typer.Option("min1", help="K线周期: min1/min5/min15/min30/min60/day/week/month"),
     start_date: str | None = typer.Option(None, help="开始日期 YYYY-MM-DD"),
     end_date: str | None = typer.Option(None, help="结束日期 YYYY-MM-DD"),
     increment: bool = typer.Option(False, help="增量导入（从最新数据时间到当前）"),
 ):
     """从 AmazingData 获取并导入K线数据"""
-    from backend.data import fetch_kline as data_fetch_kline
-
     period_int = _parse_period(period)
+    symbols, display_target = _resolve_target_symbols(symbol)
 
-    try:
-        count = data_fetch_kline(
-            symbol,
-            period_int,
-            start_date,
-            end_date,
-            increment,
-        )
-        if increment:
-            typer.echo(f"增量导入完成: {symbol} 新增 {count} 条数据")
-        else:
-            typer.echo(f"导入完成: {symbol} 共 {count} 条数据")
-    except Exception as e:
-        typer.echo(f"获取失败: {e}", err=True)
+    if len(symbols) > 1:
+        typer.echo(f"{display_target} -> {', '.join(symbols)}")
+
+    success, failed = _fetch_symbols_from_provider(symbols, period_int, start_date, end_date, increment)
+    if failed:
         raise typer.Exit(1)
+
+    count = sum(item["count"] for item in success)
+    if increment:
+        typer.echo(f"增量导入完成: {display_target} 新增 {count} 条数据")
+    else:
+        typer.echo(f"导入完成: {display_target} 共 {count} 条数据")
 
 
 @data_app.command("fetch-all")
@@ -214,27 +257,12 @@ def fetch_batch_cmd(
     increment: bool = typer.Option(False, help="增量导入（从最新数据时间到当前）"),
 ):
     """批量获取并导入指定标的的K线数据"""
-    from backend.data import fetch_kline as data_fetch_kline
-
     period_int = _parse_period(period)
+    resolved_symbols, display_target = _resolve_target_symbols(symbols)
+    if len(resolved_symbols) != len(symbols) or any(item.startswith("@") for item in symbols):
+        typer.echo(f"{display_target} -> {', '.join(resolved_symbols)}")
 
-    success = []
-    failed = []
-
-    for i, symbol in enumerate(symbols, 1):
-        typer.echo(f"[{i}/{len(symbols)}] 导入 {symbol}...")
-        try:
-            count = data_fetch_kline(
-                symbol,
-                period_int,
-                start_date,
-                end_date,
-                increment,
-            )
-            success.append({"symbol": symbol, "count": count})
-        except Exception as e:
-            failed.append({"symbol": symbol, "error": str(e)})
-            typer.echo(f"  失败: {e}", err=True)
+    success, failed = _fetch_symbols_from_provider(resolved_symbols, period_int, start_date, end_date, increment)
 
     typer.echo(f"\n批量导入完成:")
     typer.echo(f"  成功: {len(success)}")
@@ -247,6 +275,114 @@ def fetch_batch_cmd(
 
     if failed:
         raise typer.Exit(1)
+
+
+@pool_app.command("list")
+def list_symbol_pools_cmd():
+    """列出所有标的池"""
+    from backend.db import SessionLocal, list_symbol_pools
+
+    with SessionLocal() as db:
+        pools = list_symbol_pools(db)
+
+    if not pools:
+        typer.echo("暂无标的池")
+        return
+
+    typer.echo(f"\n{'名称':<20} {'数量':<6} {'描述'}")
+    typer.echo("-" * 80)
+    for pool in pools:
+        typer.echo(f"{pool.name:<20} {len(pool.symbols):<6} {pool.description or '-'}")
+
+
+@pool_app.command("show")
+def show_symbol_pool_cmd(
+    name: str = typer.Argument(..., help="标的池名称"),
+):
+    """显示标的池详情"""
+    from backend.db import SessionLocal, get_symbol_pool_by_name
+
+    with SessionLocal() as db:
+        pool = get_symbol_pool_by_name(db, name)
+
+    if not pool:
+        typer.echo("标的池不存在", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"名称: {pool.name}")
+    typer.echo(f"描述: {pool.description or '-'}")
+    typer.echo(f"标的数: {len(pool.symbols)}")
+    typer.echo(f"标的: {', '.join(pool.symbols)}")
+
+
+@pool_app.command("create")
+def create_symbol_pool_cmd(
+    name: str = typer.Argument(..., help="标的池名称"),
+    symbols: str = typer.Argument(..., help="标的代码，支持逗号分隔"),
+    description: str = typer.Option("", "--description", "-d", help="标的池描述"),
+):
+    """创建标的池"""
+    from backend.db import SessionLocal, create_symbol_pool
+
+    with SessionLocal() as db:
+        try:
+            pool = create_symbol_pool(db, name, symbols, description)
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1)
+
+    typer.echo(f"已创建标的池 @{pool.name}: {', '.join(pool.symbols)}")
+
+
+@pool_app.command("update")
+def update_symbol_pool_cmd(
+    name: str = typer.Argument(..., help="标的池名称"),
+    new_name: str | None = typer.Option(None, "--new-name", help="新的标的池名称"),
+    symbols: str | None = typer.Option(None, "--symbols", "-s", help="新的标的代码列表，支持逗号分隔"),
+    description: str | None = typer.Option(None, "--description", "-d", help="新的描述，可传空字符串清空"),
+):
+    """更新标的池"""
+    from backend.db import SessionLocal, get_symbol_pool_by_name, update_symbol_pool
+
+    if new_name is None and symbols is None and description is None:
+        typer.echo("至少提供一个更新项", err=True)
+        raise typer.Exit(1)
+
+    with SessionLocal() as db:
+        pool = get_symbol_pool_by_name(db, name)
+        if not pool:
+            typer.echo("标的池不存在", err=True)
+            raise typer.Exit(1)
+
+        try:
+            pool = update_symbol_pool(db, pool, name=new_name, symbols=symbols, description=description)
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1)
+
+    typer.echo(f"已更新标的池 @{pool.name}: {', '.join(pool.symbols)}")
+
+
+@pool_app.command("delete")
+def delete_symbol_pool_cmd(
+    name: str = typer.Argument(..., help="标的池名称"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="不提示确认，直接删除"),
+):
+    """删除标的池"""
+    from backend.db import SessionLocal, delete_symbol_pool, get_symbol_pool_by_name
+
+    with SessionLocal() as db:
+        pool = get_symbol_pool_by_name(db, name)
+        if not pool:
+            typer.echo("标的池不存在", err=True)
+            raise typer.Exit(1)
+
+        if not yes and not typer.confirm(f"确认删除标的池 @{pool.name} 吗？"):
+            raise typer.Exit(1)
+
+        delete_symbol_pool(db, pool)
+
+    typer.echo(f"已删除标的池 @{name}")
 
 
 # ---- Factor 命令 ----
@@ -436,7 +572,7 @@ def _print_backtest_result(result: dict):
 @backtest_app.command("run")
 def run_backtest_cmd(
     strategy_id: int = typer.Argument(..., help="策略 ID"),
-    symbol: str = typer.Argument(..., help="标的代码"),
+    symbol: str = typer.Argument(..., help="标的代码、逗号列表或 @标的池"),
     start_date: str = typer.Argument(..., help="开始日期 YYYY-MM-DD"),
     end_date: str = typer.Argument(..., help="结束日期 YYYY-MM-DD"),
     initial_capital: float = typer.Option(1000000.0, help="初始资金"),
@@ -450,13 +586,16 @@ def run_backtest_cmd(
     from backend.engine import BacktestEngine
     from backend.models import Backtest, Strategy
 
+    resolved_symbols, display_target = _resolve_target_symbols(symbol)
+
     # 查询数据
     start_dt = datetime.strptime(start_date, "%Y-%m-%d")
     end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-    data_dict = get_market_data(symbol, start_dt, end_dt, period=period, adjust=adjust)
+    data_dict = get_market_data(resolved_symbols, start_dt, end_dt, period=period, adjust=adjust)
 
-    if not data_dict or symbol not in data_dict:
-        typer.echo(f"无 {symbol} 的K线数据", err=True)
+    missing = [item for item in resolved_symbols if item not in data_dict or data_dict[item].empty]
+    if missing:
+        typer.echo(f"无以下标的的K线数据: {', '.join(missing)}", err=True)
         raise typer.Exit(1)
 
     with SessionLocal() as db:
@@ -465,13 +604,15 @@ def run_backtest_cmd(
             typer.echo(f"策略 ID {strategy_id} 不存在", err=True)
             raise typer.Exit(1)
 
-        typer.echo(f"开始回测: {symbol} ({start_date} ~ {end_date}) period={period} adjust={adjust}")
+        typer.echo(f"开始回测: {display_target} ({start_date} ~ {end_date}) period={period} adjust={adjust}")
+        if len(resolved_symbols) > 1:
+            typer.echo(f"  解析标的: {', '.join(resolved_symbols)}")
 
         # 执行回测
         engine = BacktestEngine(
             strategy_code=strategy.code,
-            data=data_dict[symbol],
-            symbol=symbol,
+            data=data_dict[resolved_symbols[0]] if len(resolved_symbols) == 1 else data_dict,
+            symbol=resolved_symbols if len(resolved_symbols) > 1 else resolved_symbols[0],
             initial_capital=initial_capital,
             commission=commission,
             slippage=slippage,
@@ -482,7 +623,7 @@ def run_backtest_cmd(
         try:
             backtest = Backtest(
                 strategy_id=strategy_id,
-                symbol=symbol,
+                symbol=display_target,
                 start_date=datetime.strptime(start_date, "%Y-%m-%d").date(),
                 end_date=datetime.strptime(end_date, "%Y-%m-%d").date(),
                 initial_capital=Decimal(str(initial_capital)),
@@ -514,7 +655,7 @@ def run_backtest_cmd(
 @backtest_app.command("run-file")
 def run_backtest_file_cmd(
     strategy_file: Path = typer.Argument(..., help="策略文件路径 (.py)", exists=True),
-    symbol: str = typer.Argument(..., help="标的代码，多个用逗号分隔，如 510300.SH,510500.SH"),
+    symbol: str = typer.Argument(..., help="标的代码、逗号列表或 @标的池"),
     start_date: str = typer.Argument(..., help="开始日期 YYYY-MM-DD"),
     end_date: str = typer.Argument(..., help="结束日期 YYYY-MM-DD"),
     initial_capital: float = typer.Option(1000000.0, help="初始资金"),
@@ -552,10 +693,7 @@ def run_backtest_file_cmd(
         raise typer.Exit(1)
 
     # 解析标的列表
-    symbols = [s.strip() for s in symbol.split(",") if s.strip()]
-    if not symbols:
-        typer.echo("标的代码不能为空", err=True)
-        raise typer.Exit(1)
+    symbols, display_target = _resolve_target_symbols(symbol)
 
     # 查询行情数据
     start_dt = datetime.strptime(start_date, "%Y-%m-%d")
@@ -574,7 +712,9 @@ def run_backtest_file_cmd(
         typer.echo(f"策略参数 JSON 解析失败: {e}", err=True)
         raise typer.Exit(1)
 
-    typer.echo(f"开始回测: {', '.join(symbols)} ({start_date} ~ {end_date})")
+    typer.echo(f"开始回测: {display_target} ({start_date} ~ {end_date})")
+    if len(symbols) > 1:
+        typer.echo(f"  解析标的: {', '.join(symbols)}")
     typer.echo(f"  策略文件: {strategy_file}")
     typer.echo(f"  K线周期: {period}  复权: {adjust}")
     if strategy_params:
@@ -619,10 +759,6 @@ def run_backtest_file_cmd(
             typer.echo(f"图表已保存: {render_result.filepath}")
 
     if save:
-        if len(symbols) > 1:
-            typer.echo("暂不支持保存多标的回测结果到数据库", err=True)
-            raise typer.Exit(1)
-
         if result["status"] == "failed":
             typer.echo("回测失败，不保存结果", err=True)
             raise typer.Exit(1)
@@ -655,7 +791,7 @@ def run_backtest_file_cmd(
             try:
                 backtest = Backtest(
                     strategy_id=strategy.id,
-                    symbol=symbols[0],
+                    symbol=display_target,
                     start_date=datetime.strptime(start_date, "%Y-%m-%d").date(),
                     end_date=datetime.strptime(end_date, "%Y-%m-%d").date(),
                     initial_capital=Decimal(str(initial_capital)),

@@ -231,3 +231,100 @@ class TestBacktestsAPI:
         response = client.post("/api/backtests", json=backtest_request)
 
         assert response.status_code == 422
+
+    def test_create_backtest_with_pool_name(self, client: TestClient, sample_strategy, db_session):
+        """测试使用标的池创建回测"""
+        from datetime import datetime
+
+        import pandas as pd
+
+        from backend.models import Strategy, SymbolPool
+
+        strategy = Strategy(**sample_strategy)
+        pool = SymbolPool(name="etf_core", description="核心 ETF 组合")
+        pool.symbols = ["588000.SH", "159682.SZ"]
+        db_session.add(strategy)
+        db_session.add(pool)
+        db_session.commit()
+
+        sample_df = pd.DataFrame({
+            "timestamp": [datetime(2024, 1, 1), datetime(2024, 1, 2)],
+            "open": [1.0, 1.1],
+            "high": [1.1, 1.2],
+            "low": [0.9, 1.0],
+            "close": [1.05, 1.15],
+            "volume": [1000, 1200],
+        })
+        engine_result = {
+            "status": "completed",
+            "metrics": {
+                "total_return": 0.1,
+                "annual_return": 0.12,
+                "sharpe_ratio": 1.5,
+                "max_drawdown": -0.05,
+                "win_rate": 0.5,
+            },
+            "equity_curve": [1000000.0, 1010000.0],
+            "trades": [],
+        }
+
+        with patch("backend.api.backtests.get_market_data", return_value={
+            "588000.SH": sample_df,
+            "159682.SZ": sample_df,
+        }) as mock_get_market_data, patch("backend.api.backtests.BacktestEngine") as mock_engine_cls:
+            mock_engine = MagicMock()
+            mock_engine.run.return_value = engine_result
+            mock_engine_cls.return_value = mock_engine
+
+            response = client.post(
+                "/api/backtests",
+                json={
+                    "strategy_id": strategy.id,
+                    "pool_name": "etf_core",
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-12-31",
+                },
+            )
+
+        assert response.status_code == 201
+        body = response.json()
+        assert body["symbol"] == "@etf_core"
+        assert mock_get_market_data.call_args.kwargs["symbols"] == ["588000.SH", "159682.SZ"]
+        assert mock_engine_cls.call_args.kwargs["symbol"] == ["588000.SH", "159682.SZ"]
+        assert set(mock_engine_cls.call_args.kwargs["data"].keys()) == {"588000.SH", "159682.SZ"}
+
+    def test_create_backtest_with_unknown_pool(self, client: TestClient, sample_strategy, db_session):
+        """测试使用不存在的标的池创建回测"""
+        from backend.models import Strategy
+
+        strategy = Strategy(**sample_strategy)
+        db_session.add(strategy)
+        db_session.commit()
+
+        response = client.post(
+            "/api/backtests",
+            json={
+                "strategy_id": strategy.id,
+                "pool_name": "missing_pool",
+                "start_date": "2024-01-01",
+                "end_date": "2024-12-31",
+            },
+        )
+
+        assert response.status_code == 404
+        assert "标的池不存在" in response.json()["detail"]
+
+    def test_create_backtest_requires_single_target_field(self, client: TestClient):
+        """测试回测请求只能提供一种目标字段"""
+        response = client.post(
+            "/api/backtests",
+            json={
+                "strategy_id": 1,
+                "symbol": "600000.SH",
+                "pool_name": "etf_core",
+                "start_date": "2024-01-01",
+                "end_date": "2024-12-31",
+            },
+        )
+
+        assert response.status_code == 422

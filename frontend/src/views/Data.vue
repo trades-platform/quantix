@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import { dataApi } from '../api'
+import { dataApi, symbolPoolApi } from '../api'
 import { useDataStore } from '../stores/data'
 import { useNotificationStore } from '../stores/notification'
 import { storeToRefs } from 'pinia'
@@ -14,6 +14,16 @@ const klineLoading = ref(false)
 const klineStats = ref(null)
 
 const searchQuery = ref('')
+const symbolPools = ref([])
+const poolLoading = ref(false)
+const poolSaving = ref(false)
+const showPoolDialog = ref(false)
+const editingPoolName = ref('')
+const poolForm = ref({
+  name: '',
+  description: '',
+  symbols: ''
+})
 
 // Fetch form state
 const showFetchDialog = ref(false)
@@ -46,11 +56,32 @@ const filteredSymbols = computed(() => {
   })
 })
 
+const parsedPoolSymbols = computed(() => {
+  return Array.from(new Set(
+    poolForm.value.symbols
+      .split(/[\n,]+/)
+      .map((item) => item.trim().toUpperCase())
+      .filter((item) => item)
+  ))
+})
+
 const fetchSymbols = async () => {
   try {
     await dataStore.fetchSymbols(dataApi)
   } catch (error) {
     notificationStore.error('获取标的列表失败')
+  }
+}
+
+const fetchSymbolPools = async () => {
+  poolLoading.value = true
+  try {
+    const response = await symbolPoolApi.list()
+    symbolPools.value = response.data
+  } catch (error) {
+    notificationStore.error('获取标的池列表失败')
+  } finally {
+    poolLoading.value = false
   }
 }
 
@@ -198,13 +229,90 @@ const handleBatchFetchKline = async () => {
   }
 }
 
+const resetPoolForm = () => {
+  poolForm.value = {
+    name: '',
+    description: '',
+    symbols: ''
+  }
+  editingPoolName.value = ''
+}
+
+const openPoolDialog = (pool = null) => {
+  if (pool) {
+    editingPoolName.value = pool.name
+    poolForm.value = {
+      name: pool.name,
+      description: pool.description || '',
+      symbols: pool.symbols.join(', ')
+    }
+  } else {
+    resetPoolForm()
+  }
+  showPoolDialog.value = true
+}
+
+const closePoolDialog = () => {
+  showPoolDialog.value = false
+  resetPoolForm()
+}
+
+const handlePoolSubmit = async () => {
+  const payload = {
+    name: poolForm.value.name.trim(),
+    description: poolForm.value.description.trim(),
+    symbols: parsedPoolSymbols.value
+  }
+
+  if (!payload.name) {
+    notificationStore.warning('请输入标的池名称')
+    return
+  }
+
+  if (payload.symbols.length === 0) {
+    notificationStore.warning('请至少填写一个标的代码')
+    return
+  }
+
+  poolSaving.value = true
+  try {
+    if (editingPoolName.value) {
+      await symbolPoolApi.update(editingPoolName.value, payload)
+      notificationStore.success(`已更新标的池 @${payload.name}`)
+    } else {
+      await symbolPoolApi.create(payload)
+      notificationStore.success(`已创建标的池 @${payload.name}`)
+    }
+    closePoolDialog()
+    await fetchSymbolPools()
+  } catch (error) {
+    notificationStore.error('保存标的池失败: ' + (error.response?.data?.detail || error.message))
+  } finally {
+    poolSaving.value = false
+  }
+}
+
+const deletePool = async (pool) => {
+  if (!window.confirm(`确认删除标的池 @${pool.name} 吗？`)) {
+    return
+  }
+
+  try {
+    await symbolPoolApi.delete(pool.name)
+    notificationStore.success(`已删除标的池 @${pool.name}`)
+    await fetchSymbolPools()
+  } catch (error) {
+    notificationStore.error('删除标的池失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
 const selectSymbol = (symbol) => {
   selectedSymbol.value = symbol
   fetchKline()
 }
 
 onMounted(() => {
-  fetchSymbols()
+  Promise.all([fetchSymbols(), fetchSymbolPools()])
 })
 
 watch(selectedSymbol, () => {
@@ -247,7 +355,7 @@ watch(selectedSymbol, () => {
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-      <div class="lg:col-span-1">
+      <div class="lg:col-span-1 space-y-6">
         <div class="bg-white rounded-xl shadow-sm border border-gray-100">
           <div class="p-4 border-b">
             <div class="flex space-x-2">
@@ -335,6 +443,65 @@ watch(selectedSymbol, () => {
             <div class="flex justify-between text-sm">
               <span class="text-gray-600">总计:</span>
               <span class="font-medium">{{ symbols.length }} 个标的</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <div class="px-4 py-4 border-b flex items-start justify-between gap-4">
+            <div>
+              <h3 class="font-semibold text-gray-900">标的池</h3>
+              <p class="text-sm text-gray-500 mt-1">把一组代码保存成可复用目标，供回测和批量操作使用</p>
+            </div>
+            <button
+              @click="openPoolDialog()"
+              class="shrink-0 bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              新建
+            </button>
+          </div>
+
+          <div v-if="poolLoading" class="p-6 text-center text-gray-500">
+            <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+            <p class="mt-2 text-sm">加载标的池中...</p>
+          </div>
+          <div v-else-if="symbolPools.length === 0" class="p-6 text-center text-gray-500">
+            <p class="text-sm">暂无标的池</p>
+            <p class="text-xs mt-1">例如把 `588000.SH,159682.SZ` 保存为一个可复用组合</p>
+          </div>
+          <div v-else class="divide-y divide-gray-100">
+            <div v-for="pool in symbolPools" :key="pool.name" class="p-4">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="font-medium text-gray-900 truncate">@{{ pool.name }}</div>
+                  <p class="text-sm text-gray-500 mt-1">{{ pool.description || '无描述' }}</p>
+                  <p class="text-xs text-gray-400 mt-1">{{ pool.symbols.length }} 个标的</p>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <button
+                    @click="openPoolDialog(pool)"
+                    class="px-2.5 py-1.5 text-sm border rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    编辑
+                  </button>
+                  <button
+                    @click="deletePool(pool)"
+                    class="px-2.5 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
+
+              <div class="flex flex-wrap gap-2 mt-3">
+                <span
+                  v-for="code in pool.symbols"
+                  :key="code"
+                  class="px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-medium"
+                >
+                  {{ code }}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -587,6 +754,96 @@ watch(selectedSymbol, () => {
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
               {{ batchFetching ? '获取中...' : '批量获取' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="showPoolDialog"
+        class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+        @click.self="closePoolDialog"
+      >
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden">
+          <div class="px-6 py-4 border-b flex justify-between items-center">
+            <h2 class="text-xl font-semibold">{{ editingPoolName ? '编辑标的池' : '新建标的池' }}</h2>
+            <button
+              @click="closePoolDialog"
+              class="text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div class="p-6 space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">标的池名称 <span class="text-red-500">*</span></label>
+              <input
+                v-model="poolForm.name"
+                type="text"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50 focus:bg-white transition-all"
+                placeholder="例如: etf_core"
+              />
+              <p class="text-xs text-gray-500 mt-1">仅支持字母、数字、下划线和中划线</p>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">描述</label>
+              <input
+                v-model="poolForm.description"
+                type="text"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50 focus:bg-white transition-all"
+                placeholder="例如: 核心 ETF 组合"
+              />
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">标的代码 <span class="text-red-500">*</span></label>
+              <textarea
+                v-model="poolForm.symbols"
+                rows="5"
+                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50 focus:bg-white font-mono text-sm transition-all"
+                placeholder="支持逗号或换行分隔&#10;例如：&#10;588000.SH,159682.SZ"
+              ></textarea>
+              <p class="text-xs text-gray-500 mt-1">提交时会自动去重并转成大写</p>
+            </div>
+
+            <div v-if="parsedPoolSymbols.length > 0" class="bg-gray-50 rounded-lg p-4">
+              <h3 class="text-sm font-medium text-gray-900 mb-2">预览</h3>
+              <div class="flex flex-wrap gap-2">
+                <span
+                  v-for="code in parsedPoolSymbols"
+                  :key="code"
+                  class="px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-medium"
+                >
+                  {{ code }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-6 py-4 bg-gray-50 flex justify-end space-x-3">
+            <button
+              @click="closePoolDialog"
+              :disabled="poolSaving"
+              class="px-4 py-2 border rounded-lg hover:bg-gray-100 disabled:opacity-50 transition-colors"
+            >
+              取消
+            </button>
+            <button
+              @click="handlePoolSubmit"
+              :disabled="poolSaving"
+              class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center transition-colors"
+            >
+              <svg v-if="poolSaving" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              {{ poolSaving ? '保存中...' : '保存标的池' }}
             </button>
           </div>
         </div>

@@ -2,15 +2,13 @@
 
 import json
 from datetime import datetime
-import pandas as pd
 from decimal import Decimal
 from typing import List
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field, field_validator
-from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from backend.db import SessionLocal, get_market_data
+from backend.db import SessionLocal, get_display_target, get_market_data, resolve_symbol_targets
 from backend.engine import BacktestEngine
 from backend.models import Backtest, Strategy, Trade
 
@@ -19,7 +17,9 @@ router = APIRouter(prefix="/backtests", tags=["backtests"])
 
 class BacktestCreate(BaseModel):
     strategy_id: int
-    symbol: str
+    symbol: str | None = None
+    symbols: list[str] | None = None
+    pool_name: str | None = None
     start_date: str = Field(..., description="格式: YYYY-MM-DD")
     end_date: str = Field(..., description="格式: YYYY-MM-DD")
     initial_capital: float = Field(default=1000000.0, ge=0)
@@ -35,6 +35,17 @@ class BacktestCreate(BaseModel):
         except ValueError:
             raise ValueError("Invalid date format. Expected YYYY-MM-DD")
         return v
+
+    @model_validator(mode="after")
+    def validate_target(self) -> "BacktestCreate":
+        provided = [
+            bool(self.symbol and self.symbol.strip()),
+            bool(self.symbols),
+            bool(self.pool_name and self.pool_name.strip()),
+        ]
+        if sum(provided) != 1:
+            raise ValueError("必须且只能提供 symbol、symbols 或 pool_name 其中一个")
+        return self
 
 
 class BacktestResponse(BaseModel):
@@ -94,14 +105,25 @@ def create_backtest(req: BacktestCreate):
         if not strategy:
             raise HTTPException(status_code=404, detail="策略不存在")
 
+        try:
+            raw_target = req.pool_name and f"@{req.pool_name}" or req.symbols or req.symbol or ""
+            display_target = get_display_target(raw_target)
+            resolved_symbols = resolve_symbol_targets(db, raw_target)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
         # 创建回测记录
         backtest = Backtest(
             strategy_id=req.strategy_id,
-            symbol=req.symbol,
+            symbol=display_target,
             start_date=datetime.strptime(req.start_date, "%Y-%m-%d").date(),
             end_date=datetime.strptime(req.end_date, "%Y-%m-%d").date(),
             initial_capital=Decimal(str(req.initial_capital)),
             commission=Decimal(str(req.commission)),
+            period=req.period,
+            adjust=req.adjust,
             status="running",
         )
         db.add(backtest)
@@ -112,27 +134,35 @@ def create_backtest(req: BacktestCreate):
         start_dt = datetime.strptime(req.start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(req.end_date, "%Y-%m-%d")
         data_dict = get_market_data(
-            symbols=req.symbol,
+            symbols=resolved_symbols,
             start_date=start_dt,
             end_date=end_dt,
             period=req.period,
             adjust=req.adjust,
         )
 
-        kline_data = data_dict.get(req.symbol, pd.DataFrame())
-
-        if len(kline_data) == 0:
+        missing_symbols = [symbol for symbol in resolved_symbols if symbol not in data_dict or data_dict[symbol].empty]
+        if missing_symbols:
             backtest.status = "failed"
             db.commit()
-            raise HTTPException(status_code=400, detail=f"无 {req.symbol} 的K线数据")
+            if len(missing_symbols) == 1:
+                raise HTTPException(status_code=400, detail=f"无 {missing_symbols[0]} 的K线数据")
+            raise HTTPException(status_code=400, detail=f"以下标的缺少K线数据: {', '.join(missing_symbols)}")
+
+        engine_input = (
+            data_dict[resolved_symbols[0]]
+            if len(resolved_symbols) == 1
+            else {symbol: data_dict[symbol] for symbol in resolved_symbols}
+        )
 
         # 执行回测
         engine = BacktestEngine(
             strategy_code=strategy.code,
-            data=kline_data,
-            symbol=req.symbol,
+            data=engine_input,
+            symbol=resolved_symbols if len(resolved_symbols) > 1 else resolved_symbols[0],
             initial_capital=req.initial_capital,
             commission=req.commission,
+            period=req.period,
         )
         result = engine.run()
 

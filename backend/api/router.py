@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.api.backtests import router as backtests_router
 from backend.api.data import router as data_router
 from backend.api.strategies import router as strategies_router
+from backend.api.symbol_pools import router as symbol_pools_router
 
 api_router = APIRouter()
 
@@ -28,3 +29,4 @@ def health_check():
 api_router.include_router(strategies_router)
 api_router.include_router(backtests_router)
 api_router.include_router(data_router)
+api_router.include_router(symbol_pools_router)

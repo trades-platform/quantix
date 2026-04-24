@@ -3,12 +3,18 @@
 from datetime import datetime
 from typing import List
 
-from fastapi import APIRouter, HTTPException, UploadFile, status
+from fastapi import APIRouter, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel
 import pandas as pd
 
 from backend.db import SessionLocal, import_kline, list_symbols, get_market_data
 from backend.models import Symbol
+
+try:
+    import multipart  # type: ignore[import-not-found]
+    HAS_MULTIPART = True
+except ModuleNotFoundError:
+    HAS_MULTIPART = False
 
 router = APIRouter(prefix="/data", tags=["data"])
 
@@ -166,21 +172,27 @@ def import_kline_data(req: KlineImportRequest):
         raise HTTPException(status_code=500, detail=f"导入失败: {e}")
 
 
-@router.post("/kline/upload")
-async def upload_kline_file(symbol: str, file: UploadFile):
-    """上传 CSV 文件导入K线数据
+if HAS_MULTIPART:
+    @router.post("/kline/upload")
+    async def upload_kline_file(symbol: str, file: UploadFile):
+        """上传 CSV 文件导入K线数据
 
-    CSV 格式要求:
-    timestamp,open,high,low,close,volume[,amount]
-    """
-    try:
-        content = await file.read()
-        df = pd.read_csv(pd.io.common.BytesIO(content))
+        CSV 格式要求:
+        timestamp,open,high,low,close,volume[,amount]
+        """
+        try:
+            content = await file.read()
+            df = pd.read_csv(pd.io.common.BytesIO(content))
 
-        count = import_kline(symbol, df)
-        return {"message": f"成功导入 {count} 条数据", "count": count}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"文件解析失败: {e}")
+            count = import_kline(symbol, df)
+            return {"message": f"成功导入 {count} 条数据", "count": count}
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"文件解析失败: {e}")
+else:
+    @router.post("/kline/upload")
+    async def upload_kline_file(symbol: str, request: Request):
+        """上传 CSV 文件导入K线数据（缺少 multipart 依赖时兜底）"""
+        raise HTTPException(status_code=400, detail="缺少 python-multipart，无法处理上传文件")
 
 
 @router.post("/kline/fetch")

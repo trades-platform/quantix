@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from backend.db.sqlite import engine, SessionLocal
 from backend.main import app
-from backend.models.backtest import Base
+from backend.models import Base
 
 
 @pytest.fixture(scope="function")
@@ -50,7 +50,9 @@ def client(db_session):
     import backend.db.sqlite
     import backend.api.strategies
     import backend.api.backtests
+    import backend.api.symbol_pools
     import backend.db
+    import backend.db.kline
 
     original_session = backend.db.sqlite.SessionLocal
 
@@ -59,7 +61,9 @@ def client(db_session):
     backend.api.strategies.SessionLocal = override_session
     backend.api.backtests.SessionLocal = override_session
     backend.api.data.SessionLocal = override_session
+    backend.api.symbol_pools.SessionLocal = override_session
     backend.db.SessionLocal = override_session
+    backend.db.kline.SessionLocal = override_session
 
     # 创建测试客户端
     test_client = TestClient(app)
@@ -71,7 +75,9 @@ def client(db_session):
     backend.api.strategies.SessionLocal = original_session
     backend.api.backtests.SessionLocal = original_session
     backend.api.data.SessionLocal = original_session
+    backend.api.symbol_pools.SessionLocal = original_session
     backend.db.SessionLocal = original_session
+    backend.db.kline.SessionLocal = original_session
 
 
 @pytest.fixture

@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { mockStrategies, mockSymbols, generateMockKlineData, mockBacktestResult, mockTrades } from '../stores/mock'
+import { mockStrategies, mockSymbols, mockSymbolPools, generateMockKlineData, mockBacktestResult, mockTrades } from '../stores/mock'
 
 const USE_MOCK = false
 
@@ -57,11 +57,12 @@ export const mockApi = {
   backtest: {
     create: async (data) => {
       await delay(2000)
+      const displayTarget = data.pool_name ? `@${data.pool_name}` : (data.symbol || data.symbols?.join(',') || mockBacktestResult.symbol)
       return {
         data: {
           ...mockBacktestResult,
           id: 'bt-' + Date.now(),
-          symbol: data.symbol,
+          symbol: displayTarget,
           start_date: data.start_date,
           end_date: data.end_date,
           initial_capital: data.initial_capital
@@ -105,6 +106,53 @@ export const mockApi = {
       }))
       return { data: { results, total: results.reduce((sum, r) => sum + r.count, 0) } }
     }
+  },
+  symbolPools: {
+    list: async () => {
+      await delay(300)
+      return { data: mockSymbolPools }
+    },
+    get: async (name) => {
+      await delay(200)
+      const pool = mockSymbolPools.find((item) => item.name === name)
+      if (!pool) {
+        throw new Error('Symbol pool not found')
+      }
+      return { data: pool }
+    },
+    create: async (data) => {
+      await delay(300)
+      const newPool = {
+        id: Date.now(),
+        ...data,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+      mockSymbolPools.push(newPool)
+      return { data: newPool }
+    },
+    update: async (name, data) => {
+      await delay(300)
+      const index = mockSymbolPools.findIndex((item) => item.name === name)
+      if (index === -1) {
+        throw new Error('Symbol pool not found')
+      }
+      mockSymbolPools[index] = {
+        ...mockSymbolPools[index],
+        ...data,
+        updated_at: new Date().toISOString()
+      }
+      return { data: mockSymbolPools[index] }
+    },
+    delete: async (name) => {
+      await delay(300)
+      const index = mockSymbolPools.findIndex((item) => item.name === name)
+      if (index === -1) {
+        throw new Error('Symbol pool not found')
+      }
+      mockSymbolPools.splice(index, 1)
+      return { data: { success: true } }
+    }
   }
 }
 
@@ -136,6 +184,14 @@ export const dataApi = {
   getKline: (params) => USE_MOCK ? mockApi.data.getKline(params) : api.get('/data/kline', { params }),
   fetchKline: (data) => USE_MOCK ? mockApi.data.fetchKline(data) : api.post('/data/kline/fetch', data),
   fetchKlineBatch: (data) => USE_MOCK ? mockApi.data.fetchKlineBatch(data) : api.post('/data/kline/fetch-batch', data),
+}
+
+export const symbolPoolApi = {
+  list: () => USE_MOCK ? mockApi.symbolPools.list() : api.get('/symbol-pools'),
+  get: (name) => USE_MOCK ? mockApi.symbolPools.get(name) : api.get(`/symbol-pools/${name}`),
+  create: (data) => USE_MOCK ? mockApi.symbolPools.create(data) : api.post('/symbol-pools', data),
+  update: (name, data) => USE_MOCK ? mockApi.symbolPools.update(name, data) : api.put(`/symbol-pools/${name}`, data),
+  delete: (name) => USE_MOCK ? mockApi.symbolPools.delete(name) : api.delete(`/symbol-pools/${name}`),
 }
 
 export default api

@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { strategyApi, dataApi, backtestApi } from '../api'
+import { strategyApi, dataApi, backtestApi, symbolPoolApi } from '../api'
 import { useBacktestStore } from '../stores/backtest'
 import { useNotificationStore } from '../stores/notification'
 import { storeToRefs } from 'pinia'
@@ -13,11 +13,14 @@ const notificationStore = useNotificationStore()
 
 const strategies = ref([])
 const symbols = ref([])
-const loading = ref(false)
+const symbolPools = ref([])
+const loading = ref(true)
 
 const form = ref({
   strategy_id: null,
+  target_type: 'symbol',
   symbol: '',
+  pool_name: '',
   start_date: '',
   end_date: '',
   initial_capital: 1000000,
@@ -29,6 +32,7 @@ const form = ref({
 const formErrors = ref({
   strategy_id: '',
   symbol: '',
+  pool_name: '',
   start_date: '',
   end_date: '',
   initial_capital: '',
@@ -44,6 +48,24 @@ const presets = [
 
 const selectedStrategy = computed(() => {
   return strategies.value.find((s) => s.id === form.value.strategy_id)
+})
+
+const selectedPool = computed(() => {
+  return symbolPools.value.find((pool) => pool.name === form.value.pool_name)
+})
+
+const selectedTargetLabel = computed(() => {
+  if (form.value.target_type === 'pool') {
+    return form.value.pool_name ? `@${form.value.pool_name}` : '-'
+  }
+  return form.value.symbol || '-'
+})
+
+const selectedTargetCount = computed(() => {
+  if (form.value.target_type === 'pool') {
+    return selectedPool.value?.symbols?.length || 0
+  }
+  return form.value.symbol ? 1 : 0
 })
 
 const dateRangeError = computed(() => {
@@ -65,6 +87,7 @@ const validateForm = () => {
   formErrors.value = {
     strategy_id: '',
     symbol: '',
+    pool_name: '',
     start_date: '',
     end_date: '',
     initial_capital: '',
@@ -76,7 +99,12 @@ const validateForm = () => {
     isValid = false
   }
 
-  if (!form.value.symbol) {
+  if (form.value.target_type === 'pool') {
+    if (!form.value.pool_name) {
+      formErrors.value.pool_name = '请选择标的池'
+      isValid = false
+    }
+  } else if (!form.value.symbol) {
     formErrors.value.symbol = '请选择标的'
     isValid = false
   }
@@ -129,7 +157,23 @@ const runBacktest = async () => {
   }
 
   try {
-    const result = await backtestStore.runBacktest(backtestApi, form.value)
+    const payload = {
+      strategy_id: form.value.strategy_id,
+      start_date: form.value.start_date,
+      end_date: form.value.end_date,
+      initial_capital: form.value.initial_capital,
+      commission: form.value.commission,
+      period: form.value.period,
+      adjust: form.value.adjust,
+    }
+
+    if (form.value.target_type === 'pool') {
+      payload.pool_name = form.value.pool_name
+    } else {
+      payload.symbol = form.value.symbol
+    }
+
+    const result = await backtestStore.runBacktest(backtestApi, payload)
     notificationStore.success('回测任务已启动')
     router.push(`/results?id=${result.id}`)
   } catch (error) {
@@ -172,7 +216,10 @@ onMounted(() => {
     }),
     dataApi.getSymbols().then(r => symbols.value = r.data).catch(() => {
       notificationStore.error('获取标的列表失败')
-    })
+    }),
+    symbolPoolApi.list().then(r => symbolPools.value = r.data).catch(() => {
+      notificationStore.error('获取标的池列表失败')
+    }),
   ]).finally(() => {
     loading.value = false
     setDefaultDates()
@@ -214,24 +261,75 @@ onMounted(() => {
               </p>
             </div>
 
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-2">
-                选择标的 <span class="text-red-500">*</span>
-              </label>
-              <select
-                v-model="form.symbol"
-                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50 focus:bg-white transition-all"
-                :class="{ 'border-red-500 focus:border-red-500 focus:ring-red-500/20': formErrors.symbol }"
-                :disabled="loading"
-              >
-                <option value="">请选择标的</option>
-                <option v-for="symbol in symbols" :key="symbol" :value="symbol">
-                  {{ symbol }}
-                </option>
-              </select>
-              <p v-if="formErrors.symbol" class="text-sm text-red-600 mt-1">
-                {{ formErrors.symbol }}
-              </p>
+            <div class="space-y-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                  回测目标 <span class="text-red-500">*</span>
+                </label>
+                <div class="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    @click="form.target_type = 'symbol'"
+                    class="px-4 py-3 border rounded-lg text-left transition-all"
+                    :class="form.target_type === 'symbol' ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'"
+                  >
+                    <div class="font-medium">单标的</div>
+                    <div class="text-xs mt-1 text-gray-500">选择一个具体代码运行回测</div>
+                  </button>
+                  <button
+                    type="button"
+                    @click="form.target_type = 'pool'"
+                    class="px-4 py-3 border rounded-lg text-left transition-all"
+                    :class="form.target_type === 'pool' ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'"
+                  >
+                    <div class="font-medium">标的池</div>
+                    <div class="text-xs mt-1 text-gray-500">复用一组已保存的代码集合</div>
+                  </button>
+                </div>
+              </div>
+
+              <div v-if="form.target_type === 'symbol'">
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                  选择标的 <span class="text-red-500">*</span>
+                </label>
+                <select
+                  v-model="form.symbol"
+                  class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50 focus:bg-white transition-all"
+                  :class="{ 'border-red-500 focus:border-red-500 focus:ring-red-500/20': formErrors.symbol }"
+                  :disabled="loading"
+                >
+                  <option value="">请选择标的</option>
+                  <option v-for="item in symbols" :key="item.symbol" :value="item.symbol">
+                    {{ item.symbol }}{{ item.name ? ` · ${item.name}` : '' }}
+                  </option>
+                </select>
+                <p v-if="formErrors.symbol" class="text-sm text-red-600 mt-1">
+                  {{ formErrors.symbol }}
+                </p>
+              </div>
+
+              <div v-else>
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                  选择标的池 <span class="text-red-500">*</span>
+                </label>
+                <select
+                  v-model="form.pool_name"
+                  class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50 focus:bg-white transition-all"
+                  :class="{ 'border-red-500 focus:border-red-500 focus:ring-red-500/20': formErrors.pool_name }"
+                  :disabled="loading"
+                >
+                  <option value="">请选择标的池</option>
+                  <option v-for="pool in symbolPools" :key="pool.name" :value="pool.name">
+                    @{{ pool.name }} · {{ pool.symbols.length }} 个标的
+                  </option>
+                </select>
+                <p v-if="formErrors.pool_name" class="text-sm text-red-600 mt-1">
+                  {{ formErrors.pool_name }}
+                </p>
+                <p v-else-if="selectedPool" class="text-xs text-gray-500 mt-1">
+                  {{ selectedPool.description || '无描述' }} · {{ selectedPool.symbols.join(', ') }}
+                </p>
+              </div>
             </div>
 
             <div>
@@ -417,7 +515,11 @@ onMounted(() => {
             </div>
             <div class="flex justify-between">
               <span class="text-gray-600">标的:</span>
-              <span class="font-medium">{{ form.symbol || '-' }}</span>
+              <span class="font-medium">{{ selectedTargetLabel }}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">标的数量:</span>
+              <span class="font-medium">{{ selectedTargetCount || '-' }}</span>
             </div>
             <div class="flex justify-between">
               <span class="text-gray-600">回测期间:</span>
