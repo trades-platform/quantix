@@ -94,8 +94,35 @@ def test_rsi_insufficient_data():
 def test_boll(price_data):
     """布林带返回 (upper, middle, lower) 三元组"""
     ind = SymbolIndicators(price_data)
+    ind.set_current_idx(len(price_data))
     upper, middle, lower = ind.boll()
     assert upper > middle > lower
+
+
+def test_boll_regime(price_data):
+    ind = SymbolIndicators(price_data)
+    ind.set_current_idx(len(price_data))
+    regime = ind.boll_regime()
+    assert regime in {"up", "down", "range", "unknown"}
+
+
+def test_boll_regime_score(price_data):
+    ind = SymbolIndicators(price_data)
+    ind.set_current_idx(len(price_data))
+    score = ind.boll_regime_score()
+    assert isinstance(score, float)
+    assert -100 <= score <= 100
+
+
+def test_boll_regime_invalid_lookback_returns_safe_defaults(price_data):
+    ind = SymbolIndicators(price_data)
+    ind.set_current_idx(len(price_data))
+
+    assert ind.boll_regime(trend_lookback=0) == "unknown"
+    assert ind.boll_regime_score(trend_lookback=0) == 0.0
+
+    assert ind.boll_regime(trend_lookback=-1) == "unknown"
+    assert ind.boll_regime_score(trend_lookback=-1) == 0.0
 
 
 def test_atr(price_data):

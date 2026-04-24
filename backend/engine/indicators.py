@@ -18,7 +18,12 @@ class SymbolIndicators:
             data: 完整历史K线数据，包含列: timestamp, open, high, low, close, volume
         """
         self._data = data
-        self._current_idx = 0
+        self._current_idx = len(data)
+
+    @staticmethod
+    def _valid_trend_params(period: int, trend_lookback: int) -> bool:
+        """布林趋势状态相关参数必须为正整数。"""
+        return period > 0 and trend_lookback > 0
 
     def set_current_idx(self, idx: int):
         """设置当前可见数据的截止行索引（不含 idx）"""
@@ -185,6 +190,127 @@ class SymbolIndicators:
         atr = tr.tail(period).mean()
 
         return float(atr)
+
+    def boll_regime(
+        self,
+        period: int = 20,
+        std_dev: float = 2.0,
+        trend_lookback: int = 3,
+        trend_scale: float = 100.0,
+        flat_angle_threshold: float = 3.0,
+        strong_angle_threshold: float = 8.0,
+        narrow_band_threshold: float = 0.04,
+    ) -> str:
+        """基于布林带判断当前 bar 所处状态"""
+        if not self._valid_trend_params(period, trend_lookback):
+            return "unknown"
+
+        data = self._visible
+        required = max(period, period + trend_lookback)
+        if len(data) < required:
+            return "unknown"
+
+        upper, middle, lower = self.boll(period=period, std_dev=std_dev)
+        if np.isnan(upper) or np.isnan(middle) or np.isnan(lower) or middle == 0:
+            return "unknown"
+
+        close = float(data["close"].iloc[-1])
+        band_width = (upper - lower) / middle
+
+        middle_series = data["close"].rolling(window=period).mean()
+        current_middle = float(middle_series.iloc[-1])
+        prev_middle = float(middle_series.iloc[-(trend_lookback + 1)])
+        if prev_middle == 0:
+            return "unknown"
+
+        slope = ((current_middle - prev_middle) / prev_middle) / trend_lookback
+        middle_angle = float(np.degrees(np.arctan(slope * trend_scale)))
+
+        if abs(middle_angle) <= flat_angle_threshold:
+            return "range"
+        if band_width <= narrow_band_threshold:
+            return "range"
+        if close >= middle and middle_angle >= strong_angle_threshold:
+            return "up"
+        if close <= middle and middle_angle <= -strong_angle_threshold:
+            return "down"
+        if close >= middle and middle_angle > flat_angle_threshold:
+            return "up"
+        if close <= middle and middle_angle < -flat_angle_threshold:
+            return "down"
+        return "range"
+
+    def _boll_regime_strength(
+        self,
+        period: int = 20,
+        std_dev: float = 2.0,
+        trend_lookback: int = 3,
+        trend_scale: float = 100.0,
+    ) -> float:
+        """基于布林带计算趋势强弱分数，范围 0 到 100。"""
+        if not self._valid_trend_params(period, trend_lookback):
+            return 0.0
+
+        data = self._visible
+        required = max(period, period + trend_lookback)
+        if len(data) < required:
+            return 0.0
+
+        upper, middle, lower = self.boll(period=period, std_dev=std_dev)
+        if np.isnan(upper) or np.isnan(middle) or np.isnan(lower) or middle == 0:
+            return 0.0
+
+        close = float(data["close"].iloc[-1])
+        band_width = (upper - lower) / middle
+        if band_width <= 0:
+            return 0.0
+
+        middle_series = data["close"].rolling(window=period).mean()
+        current_middle = float(middle_series.iloc[-1])
+        prev_middle = float(middle_series.iloc[-(trend_lookback + 1)])
+        if prev_middle == 0:
+            return 0.0
+
+        slope = ((current_middle - prev_middle) / prev_middle) / trend_lookback
+        middle_angle = float(np.degrees(np.arctan(slope * trend_scale)))
+
+        angle_strength = abs(np.tanh(middle_angle / 12.0))
+        band_strength = np.tanh(band_width / 0.08)
+        if upper == lower:
+            position_strength = 0.0
+        else:
+            band_position = abs(((close - lower) / (upper - lower)) * 2 - 1)
+            position_strength = float(np.clip(band_position, 0.0, 1.0))
+
+        strength = 0.5 * angle_strength + 0.25 * band_strength + 0.25 * position_strength
+        if not np.isfinite(strength):
+            return 0.0
+        return float(np.clip(strength * 100, 0, 100))
+
+    def boll_regime_score(
+        self,
+        period: int = 20,
+        std_dev: float = 2.0,
+        trend_lookback: int = 3,
+        trend_scale: float = 100.0,
+    ) -> float:
+        regime = self.boll_regime(
+            period=period,
+            std_dev=std_dev,
+            trend_lookback=trend_lookback,
+            trend_scale=trend_scale,
+        )
+        strength = self._boll_regime_strength(
+            period=period,
+            std_dev=std_dev,
+            trend_lookback=trend_lookback,
+            trend_scale=trend_scale,
+        )
+        if regime == "up":
+            return strength
+        if regime == "down":
+            return -strength
+        return 0.0
 
     def roc(self, period: int) -> float:
         """变动率指标 (Rate of Change / Momentum)
