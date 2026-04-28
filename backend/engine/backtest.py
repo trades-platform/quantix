@@ -38,7 +38,8 @@ class Portfolio:
         self.positions: dict[str, int] = {}
         self.trades = []
         self.equity_curve = [initial_capital]
-        self._avg_cost: dict[str, float] = {}  # 持仓平均成本
+        self._avg_cost: dict[str, float] = {}  # 持仓平均成本（不含佣金）
+        self._buy_commission_acc: dict[str, float] = {}  # 未平仓累计买入佣金
 
     def execute_order(self, order: dict, price: float) -> bool:
         """执行订单，含滑点
@@ -72,6 +73,8 @@ class Portfolio:
                 self._avg_cost[symbol] = (current_cost * current_qty + exec_price * new_qty) / (current_qty + new_qty)
             else:
                 self._avg_cost[symbol] = exec_price
+            # 累计未平仓买入佣金（用于卖出时按比例分摊）
+            self._buy_commission_acc[symbol] = self._buy_commission_acc.get(symbol, 0.0) + commission_cost
 
             self.trades.append({
                 "symbol": symbol,
@@ -90,18 +93,27 @@ class Portfolio:
                 return False  # 持仓不足
 
             # 计算盈亏（必须在更新持仓之前取 avg_cost）
+            current_qty_before = self.positions.get(symbol, 0)
             avg_cost = self._avg_cost.get(symbol, 0.0)
             gross_pnl = (exec_price - avg_cost) * quantity
             commission_cost = exec_price * quantity * self.commission
-            net_pnl = gross_pnl - commission_cost
+            # 按比例分摊未平仓的买入佣金
+            buy_comm_total = self._buy_commission_acc.get(symbol, 0.0)
+            buy_commission_portion = (
+                buy_comm_total * (quantity / current_qty_before) if current_qty_before > 0 else 0.0
+            )
+            net_pnl = gross_pnl - commission_cost - buy_commission_portion
 
             proceeds = exec_price * quantity * (1 - self.commission)
             self.cash += proceeds
             self.positions[symbol] = self.positions.get(symbol, 0) - quantity
+            self._buy_commission_acc[symbol] = max(0.0, buy_comm_total - buy_commission_portion)
             if self.positions[symbol] == 0:
                 del self.positions[symbol]
                 if symbol in self._avg_cost:
                     del self._avg_cost[symbol]
+                if symbol in self._buy_commission_acc:
+                    del self._buy_commission_acc[symbol]
 
             self.trades.append({
                 "symbol": symbol,
@@ -254,13 +266,19 @@ class BacktestEngine:
             context.datetime = str(ts)
 
             # --- 步骤 1：在当前 bar 开盘价执行上一根 bar 的挂单 ---
+            carryover: list[dict] = []
             for order in pending_orders:
                 sym = order.get("symbol")
                 if sym in current_bars:
+                    # 把成交时间戳改写为当前 bar（实际成交时间）
+                    order["timestamp"] = str(ts)
                     portfolio.execute_order(order, current_bars[sym].open)
-                # 每笔订单执行后立即同步持仓到上下文
-                context.positions = portfolio.positions.copy()
-                context.cash = portfolio.cash
+                    # 每笔订单执行后立即同步持仓到上下文
+                    context.positions = portfolio.positions.copy()
+                    context.cash = portfolio.cash
+                else:
+                    # 当前时刻该标的无 bar（停牌/休市/数据缺失），挂到下一根再尝试
+                    carryover.append(order)
             pending_orders = []
 
             # --- 步骤 2：更新技术指标（增量，仅更新当前行索引）---
@@ -272,8 +290,8 @@ class BacktestEngine:
             # --- 步骤 3：执行策略，生成新信号 ---
             orders = executor.handle_bar(context)
 
-            # --- 步骤 4：新订单挂起，下一根 bar 开盘执行 ---
-            pending_orders = orders
+            # --- 步骤 4：新订单挂起，下一根 bar 开盘执行（含上一轮未匹配的挂单）---
+            pending_orders = list(orders) + carryover
 
             # --- 步骤 5：更新组合价值 ---
             prices = {sym: bar.close for sym, bar in current_bars.items()}
@@ -290,6 +308,7 @@ class BacktestEngine:
             "equity_curve": portfolio.equity_curve,
             "trades": portfolio.trades,
             "final_value": portfolio.equity_curve[-1] if portfolio.equity_curve else self.initial_capital,
+            "unfilled_orders": pending_orders,
         }
 
     def _empty_result(self) -> dict:

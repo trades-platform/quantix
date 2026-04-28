@@ -120,7 +120,14 @@ def _resample_daily(df: pd.DataFrame) -> pd.DataFrame:
     """日线聚合。过滤非交易时间行后按日期分组。"""
     df = df.copy()
     time_val = df["timestamp"].dt.hour * 100 + df["timestamp"].dt.minute
-    df = df[((time_val >= 930) & (time_val <= 1130)) | ((time_val >= 1300) & (time_val <= 1500))]
+    # 已是日线（所有时间戳都在交易时段外，例如 00:00:00），直接归一化日期返回
+    in_session = ((time_val >= 930) & (time_val <= 1130)) | ((time_val >= 1300) & (time_val <= 1500))
+    if not in_session.any():
+        df = df.sort_values("timestamp").reset_index(drop=True)
+        df["timestamp"] = df["timestamp"].dt.normalize()
+        cols = ["timestamp", "open", "high", "low", "close", "volume", "amount"]
+        return df[cols]
+    df = df[in_session]
 
     df["date"] = df["timestamp"].dt.date
     result = df.groupby("date").agg({

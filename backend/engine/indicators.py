@@ -169,6 +169,9 @@ class SymbolIndicators:
     def kdj(self, n: int = 9, m1: int = 3, m2: int = 3) -> tuple[float, float, float]:
         """随机指标 (KDJ)
 
+        从历史起始点用 K=D=50 作为种子，按通达信公式递推到当前 bar，
+        避免每根 bar 用独立的短窗口重新累积导致数值不稳定。
+
         Args:
             n: RSV 周期
             m1: K 值平滑周期
@@ -178,32 +181,33 @@ class SymbolIndicators:
             (K, D, J)
         """
         data = self._visible
-        if len(data) < n + m1 + m2:
+        if len(data) < n:
             return (np.nan, np.nan, np.nan)
 
-        # 需要足够的历史数据来累积 K/D
-        lookback = n + m1 + m2
-        visible_tail = data.tail(lookback)
+        high = data["high"].values
+        low = data["low"].values
+        close = data["close"].values
+
+        # 滚动 n 周期最高/最低
+        high_s = pd.Series(high)
+        low_s = pd.Series(low)
+        rolling_high = high_s.rolling(n, min_periods=n).max().values
+        rolling_low = low_s.rolling(n, min_periods=n).min().values
 
         k = 50.0
         d = 50.0
-
         alpha_k = 1.0 / m1
         alpha_d = 1.0 / m2
 
-        for i in range(n - 1, len(visible_tail)):
-            window = visible_tail.iloc[max(0, i - n + 1):i + 1]
-            highest = window["high"].max()
-            lowest = window["low"].min()
-
+        for i in range(n - 1, len(data)):
+            highest = rolling_high[i]
+            lowest = rolling_low[i]
             if highest == lowest:
                 rsv = 50.0
             else:
-                rsv = 100.0 * (visible_tail["close"].iloc[i] - lowest) / (highest - lowest)
-
+                rsv = 100.0 * (close[i] - lowest) / (highest - lowest)
             k = (1 - alpha_k) * k + alpha_k * rsv
             d = (1 - alpha_d) * d + alpha_d * k
 
         j = 3 * k - 2 * d
-
         return (float(k), float(d), float(j))

@@ -40,11 +40,18 @@ def calculate_metrics(
     # 年化收益率：用 bars_per_year 正确年化
     n = len(equity_curve) - 1  # bar 数量
     years = n / bars_per_year
-    annual_return = (1 + total_return) ** (1 / years) - 1 if years > 0 else 0.0
+    if years > 0 and (1 + total_return) > 0:
+        annual_return = (1 + total_return) ** (1 / years) - 1
+    else:
+        # 爆仓或年限为 0 时退化
+        annual_return = -1.0 if (1 + total_return) <= 0 else 0.0
 
     # 夏普比率：用 bars_per_year 年化
     if n > 1:
-        returns = np.diff(equity) / equity[:-1]
+        # 防止除零：将 0 净值替换为 NaN，相应的收益率视为 0
+        prev = equity[:-1]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            returns = np.where(prev > 0, np.diff(equity) / np.where(prev > 0, prev, 1), 0.0)
         excess_returns = returns - risk_free_rate / bars_per_year
         sharpe_ratio = (
             np.mean(excess_returns) / np.std(excess_returns) * np.sqrt(bars_per_year)

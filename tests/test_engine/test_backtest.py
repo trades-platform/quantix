@@ -400,11 +400,12 @@ def handle_bar(context):
     assert sell_trade["side"] == "sell"
     # 信号 bar 1 收盘生成买入，bar 2 开盘执行：买入价 = open[1] = 9.5
     # 信号 bar 2 收盘生成卖出，bar 3 开盘执行：卖出价 = open[2] = 9.0
-    # PnL = (9.0 - 9.5) * 100 - sell_commission
-    # sell_commission = 9.0 * 100 * 0.0003 = 0.027
-    # net PnL = -50 - 0.027 = -50.027
+    # PnL = (9.0 - 9.5) * 100 - buy_commission - sell_commission
+    # buy_commission  = 9.5 * 100 * 0.0003 = 0.285
+    # sell_commission = 9.0 * 100 * 0.0003 = 0.270
+    # net PnL = -50 - 0.285 - 0.270 = -50.555
     assert sell_trade["pnl"] < 0
-    expected_pnl = (9.0 - 9.5) * 100 - 9.0 * 100 * 0.0003
+    expected_pnl = (9.0 - 9.5) * 100 - 9.5 * 100 * 0.0003 - 9.0 * 100 * 0.0003
     assert abs(sell_trade["pnl"] - expected_pnl) < 1e-6
 
 
