@@ -40,6 +40,7 @@ class Portfolio:
         self.equity_curve = [initial_capital]
         self._avg_cost: dict[str, float] = {}  # 持仓平均成本（不含佣金）
         self._buy_commission_acc: dict[str, float] = {}  # 未平仓累计买入佣金
+        self._last_prices: dict[str, float] = {}  # 各标的最后已知收盘价（用于估值兜底）
 
     def execute_order(self, order: dict, price: float) -> bool:
         """执行订单，含滑点
@@ -128,8 +129,20 @@ class Portfolio:
         return True
 
     def update_value(self, prices: dict[str, float]):
-        """更新组合价值"""
-        position_value = sum(qty * prices.get(symbol, 0) for symbol, qty in self.positions.items())
+        """更新组合价值
+
+        当某个持仓标的在本根 bar 没有报价（停牌/数据缺失）时，沿用最后已知收盘价
+        估值，避免该标的市值被错算成 0 导致权益曲线断崖。
+        """
+        for sym, px in prices.items():
+            if px > 0:
+                self._last_prices[sym] = px
+        position_value = 0.0
+        for symbol, qty in self.positions.items():
+            px = prices.get(symbol)
+            if not px or px <= 0:
+                px = self._last_prices.get(symbol, 0.0)
+            position_value += qty * px
         self.equity_curve.append(self.cash + position_value)
 
 

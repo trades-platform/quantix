@@ -166,6 +166,21 @@ class SymbolIndicators:
 
         return float(atr)
 
+    def history(self, field: str, period: int) -> list[float]:
+        """获取最近 N 根可见 K 线的指定字段
+
+        Args:
+            field: 字段名 ("open", "high", "low", "close", "volume" 等)
+            period: 取最近多少根
+
+        Returns:
+            最近 N 个值的列表，数据不足时返回全部可用值（可能少于 period）
+        """
+        data = self._visible
+        if len(data) == 0 or field not in data.columns:
+            return []
+        return data[field].tail(period).tolist()
+
     def kdj(self, n: int = 9, m1: int = 3, m2: int = 3) -> tuple[float, float, float]:
         """随机指标 (KDJ)
 
