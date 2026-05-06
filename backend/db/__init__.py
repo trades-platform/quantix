@@ -1,7 +1,7 @@
 """后端数据层"""
 
 from backend.db.factor import import_factor, list_factor_symbols
-from backend.db.kline import get_market_data, get_table_name, import_kline, list_symbols
+from backend.db.kline import delete_symbol, get_market_data, get_table_name, import_kline, list_symbols
 from backend.db.lancedb import get_kline_db
 from backend.db.sqlite import SessionLocal, engine, init_db
 
@@ -10,6 +10,7 @@ __all__ = [
     "engine",
     "SessionLocal",
     "get_kline_db",
+    "delete_symbol",
     "import_kline",
     "get_market_data",
     "list_symbols",

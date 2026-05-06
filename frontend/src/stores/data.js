@@ -98,6 +98,26 @@ export const useDataStore = defineStore('data', () => {
     }
   }
 
+  const deleteSymbol = async (api, symbol) => {
+    error.value = null
+    try {
+      await api.deleteSymbol(symbol)
+      symbols.value = symbols.value.filter(s => {
+        const code = typeof s === 'string' ? s : s.symbol
+        return code !== symbol
+      })
+      if (selectedSymbol.value === symbol) {
+        selectedSymbol.value = null
+        klineData.value = []
+        chartIndicators.value = []
+      }
+      return true
+    } catch (err) {
+      error.value = err.response?.data?.detail || err.message || '删除失败'
+      throw err
+    }
+  }
+
   return {
     symbols,
     klineData,
@@ -112,6 +132,7 @@ export const useDataStore = defineStore('data', () => {
     fetchChartData,
     clearKlineData,
     fetchSingleKline,
-    fetchBatchKline
+    fetchBatchKline,
+    deleteSymbol
   }
 })

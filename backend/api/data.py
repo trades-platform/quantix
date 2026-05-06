@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, status
 from pydantic import BaseModel
 import pandas as pd
 
-from backend.db import SessionLocal, import_kline, list_symbols, get_market_data
+from backend.db import SessionLocal, delete_symbol, import_kline, list_symbols, get_market_data
 from backend.models import Symbol
 from backend.plotting import ChartBuilder
 from backend.plotting.serialize import (
@@ -66,6 +66,15 @@ def get_symbols():
             }
             for s in symbols
         ]
+
+
+@router.delete("/symbols/{symbol}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_symbol_endpoint(symbol: str):
+    """删除标的及其K线数据"""
+    try:
+        delete_symbol(symbol)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Symbol not found: {symbol}")
 
 
 @router.get("/kline")

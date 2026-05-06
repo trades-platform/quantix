@@ -190,6 +190,27 @@ def _query_kline_batch(
     return result
 
 
+def delete_symbol(symbol: str) -> None:
+    """删除标的及其 K 线数据
+
+    Args:
+        symbol: 标的代码
+
+    Raises:
+        ValueError: 标的不存在
+    """
+    with SessionLocal() as session:
+        deleted = session.query(Symbol).filter(Symbol.symbol == symbol).delete()
+        if deleted == 0:
+            raise ValueError(f"Symbol not found: {symbol}")
+        session.commit()
+
+    db = get_kline_db()
+    table_name = get_table_name(symbol)
+    if table_name in _get_table_list(db):
+        db.drop_table(table_name)
+
+
 def get_market_data(
     symbols: str | list[str],
     start_date: datetime | None = None,

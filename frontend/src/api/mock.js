@@ -113,6 +113,10 @@ export const mockApi = {
     getChartHtml: async (params) => {
       await delay(1000)
       return { data: { html: '<html><body><h1>Mock Chart HTML</h1></body></html>' } }
+    },
+    deleteSymbol: async (symbol) => {
+      await delay(300)
+      return { data: null }
     }
   }
 }
@@ -147,6 +151,7 @@ export const dataApi = {
   getChartHtml: (data) => USE_MOCK ? mockApi.data.getChartHtml(data) : api.post('/data/chart-html', data),
   fetchKline: (data) => USE_MOCK ? mockApi.data.fetchKline(data) : api.post('/data/kline/fetch', data),
   fetchKlineBatch: (data) => USE_MOCK ? mockApi.data.fetchKlineBatch(data) : api.post('/data/kline/fetch-batch', data),
+  deleteSymbol: (symbol) => USE_MOCK ? mockApi.data.deleteSymbol(symbol) : api.delete(`/data/symbols/${encodeURIComponent(symbol)}`),
 }
 
 export default api

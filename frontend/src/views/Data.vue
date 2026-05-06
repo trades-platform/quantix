@@ -184,6 +184,31 @@ const batchFetchForm = ref({
 const batchFetching = ref(false)
 const batchFetchResults = ref([])
 
+// Delete state
+const showDeleteDialog = ref(false)
+const deletingSymbol = ref(null)
+const deleting = ref(false)
+
+const confirmDeleteSymbol = (symbol) => {
+  deletingSymbol.value = symbol
+  showDeleteDialog.value = true
+}
+
+const handleDeleteSymbol = async () => {
+  if (!deletingSymbol.value) return
+  deleting.value = true
+  try {
+    await dataStore.deleteSymbol(dataApi, deletingSymbol.value)
+    notificationStore.success(`已删除 ${deletingSymbol.value}`)
+    showDeleteDialog.value = false
+    deletingSymbol.value = null
+  } catch (error) {
+    notificationStore.error('删除失败: ' + error.response?.data?.detail || error.message)
+  } finally {
+    deleting.value = false
+  }
+}
+
 const filteredSymbols = computed(() => {
   if (!searchQuery.value) return symbols.value
   const query = searchQuery.value.toLowerCase()
@@ -533,6 +558,7 @@ watch(selectedMaPeriods, saveSettings, { deep: true })
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">起始时间</th>
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">结束时间</th>
                     <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">数据量</th>
+                    <th class="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">操作</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-200 bg-white">
@@ -566,6 +592,17 @@ watch(selectedMaPeriods, saveSettings, { deep: true })
                     </td>
                     <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600 text-right">
                       {{ typeof item === 'string' ? '-' : (item.row_count?.toLocaleString() || '-') }}
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap text-center">
+                      <button
+                        @click.stop="confirmDeleteSymbol(typeof item === 'string' ? item : item.symbol)"
+                        class="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                        title="删除标的"
+                      >
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
                     </td>
                   </tr>
                 </tbody>
@@ -888,6 +925,46 @@ watch(selectedMaPeriods, saveSettings, { deep: true })
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
               {{ batchFetching ? '获取中...' : '批量获取' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="showDeleteDialog"
+        class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+        @click.self="showDeleteDialog = false"
+      >
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden" @click.stop>
+          <div class="px-6 py-4 border-b">
+            <h2 class="text-xl font-semibold">确认删除</h2>
+          </div>
+
+          <div class="p-6">
+            <p class="text-gray-700">确定要删除标的 <span class="font-semibold text-gray-900">{{ deletingSymbol }}</span> 及其所有 K 线数据吗？</p>
+            <p class="text-sm text-red-500 mt-2">此操作不可撤销。</p>
+          </div>
+
+          <div class="px-6 py-4 bg-gray-50 flex justify-end space-x-3">
+            <button
+              @click="showDeleteDialog = false"
+              :disabled="deleting"
+              class="px-4 py-2 border rounded-lg hover:bg-gray-100 disabled:opacity-50 transition-colors"
+            >
+              取消
+            </button>
+            <button
+              @click="handleDeleteSymbol"
+              :disabled="deleting"
+              class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center transition-colors"
+            >
+              <svg v-if="deleting" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              {{ deleting ? '删除中...' : '确认删除' }}
             </button>
           </div>
         </div>
