@@ -222,6 +222,9 @@ class BacktestEngine:
         for symbol, df in resampled_data.items():
             indicator_objects[symbol] = SymbolIndicators(df)
 
+        # 记录每个标的的最新已知收盘价（用于跨市场非交易日估值）
+        last_known_close: dict[str, float] = {}
+
         # 待执行订单队列（上一根 bar 生成的信号，在当前 bar 开盘执行）
         pending_orders: list[dict] = []
 
@@ -276,7 +279,10 @@ class BacktestEngine:
             pending_orders = orders
 
             # --- 步骤 5：更新组合价值 ---
-            prices = {sym: bar.close for sym, bar in current_bars.items()}
+            # 更新最新已知收盘价，缺失标的用上次价格估值
+            for sym, bar in current_bars.items():
+                last_known_close[sym] = bar.close
+            prices = {sym: last_known_close[sym] for sym in portfolio.positions}
             portfolio.update_value(prices)
             context.portfolio_value = portfolio.equity_curve[-1]
 

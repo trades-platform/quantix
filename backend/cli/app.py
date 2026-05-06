@@ -481,7 +481,7 @@ def run_backtest_cmd(
 @backtest_app.command("run-file")
 def run_backtest_file_cmd(
     strategy_file: Path = typer.Argument(..., help="策略文件路径 (.py)", exists=True),
-    symbol: str = typer.Argument(..., help="标的代码"),
+    symbol: str = typer.Argument(..., help="标的代码，多标的用逗号分隔"),
     start_date: str = typer.Argument(..., help="开始日期 YYYY-MM-DD"),
     end_date: str = typer.Argument(..., help="结束日期 YYYY-MM-DD"),
     initial_capital: float = typer.Option(1000000.0, help="初始资金"),
@@ -514,12 +514,15 @@ def run_backtest_file_cmd(
         typer.echo(f"策略代码无效: {e}", err=True)
         raise typer.Exit(1)
 
+    # 解析标的列表（支持逗号分隔）
+    symbols = [s.strip() for s in symbol.split(",")]
+
     # 查询行情数据
     start_dt = datetime.strptime(start_date, "%Y-%m-%d")
     end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-    data_dict = get_market_data(symbol, start_dt, end_dt, period=period, adjust=adjust)
+    data_dict = get_market_data(symbols, start_dt, end_dt, period="1min", adjust=adjust)
 
-    if not data_dict or symbol not in data_dict:
+    if not data_dict:
         typer.echo(f"无 {symbol} 的K线数据", err=True)
         raise typer.Exit(1)
 
@@ -530,19 +533,19 @@ def run_backtest_file_cmd(
         typer.echo(f"策略参数 JSON 解析失败: {e}", err=True)
         raise typer.Exit(1)
 
-    kline_data = data_dict[symbol]
+    total_bars = sum(len(df) for df in data_dict.values())
     typer.echo(f"开始回测: {symbol} ({start_date} ~ {end_date})")
     typer.echo(f"  策略文件: {strategy_file}")
     typer.echo(f"  K线周期: {period}  复权: {adjust}")
     if strategy_params:
         typer.echo(f"  策略参数: {strategy_params}")
-    typer.echo(f"  数据量: {len(kline_data)} bars")
+    typer.echo(f"  数据量: {total_bars} bars ({len(symbols)} 标的)")
 
     # 执行回测
     engine = BacktestEngine(
         strategy_code=strategy_code,
-        data=kline_data,
-        symbol=symbol,
+        data=data_dict,
+        symbol=symbols,
         initial_capital=initial_capital,
         commission=commission,
         slippage=slippage,
