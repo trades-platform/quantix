@@ -1,5 +1,7 @@
 """数据管理 API"""
 
+import os
+import tempfile
 from datetime import datetime
 from typing import List
 
@@ -9,6 +11,13 @@ import pandas as pd
 
 from backend.db import SessionLocal, import_kline, list_symbols, get_market_data
 from backend.models import Symbol
+from backend.plotting import ChartBuilder
+from backend.plotting.serialize import (
+    DEFAULT_LAYERS,
+    _raw_to_layerspec,
+    indicator_series_to_dict,
+)
+from backend.plotting.types import PlotConfig
 
 router = APIRouter(prefix="/data", tags=["data"])
 
@@ -83,17 +92,15 @@ def get_kline_data(symbol: str, start_date: str | None = None, end_date: str | N
         data = data.iloc[-limit:]
 
     # 转换为 JSON 友好格式
-    result = []
-    for _, row in data.iterrows():
-        result.append({
-            "timestamp": row["timestamp"].isoformat(),
-            "open": float(row["open"]),
-            "high": float(row["high"]),
-            "low": float(row["low"]),
-            "close": float(row["close"]),
-            "volume": int(row["volume"]),
-            "amount": float(row.get("amount", 0)),
-        })
+    df_out = data[["timestamp", "open", "high", "low", "close", "volume", "amount"]].copy()
+    df_out["timestamp"] = df_out["timestamp"].astype(str)
+    df_out["volume"] = df_out["volume"].astype(int)
+    df_out["open"] = df_out["open"].astype(float)
+    df_out["high"] = df_out["high"].astype(float)
+    df_out["low"] = df_out["low"].astype(float)
+    df_out["close"] = df_out["close"].astype(float)
+    df_out["amount"] = df_out["amount"].astype(float)
+    result = df_out.to_dict(orient="records")
 
     return {"symbol": symbol, "data": result}
 
@@ -130,18 +137,15 @@ def get_market_data_api(req: MarketDataRequest):
 
     result = {}
     for symbol, df in data_dict.items():
-        rows = []
-        for _, row in df.iterrows():
-            rows.append({
-                "timestamp": row["timestamp"].isoformat(),
-                "open": float(row["open"]),
-                "high": float(row["high"]),
-                "low": float(row["low"]),
-                "close": float(row["close"]),
-                "volume": int(row["volume"]),
-                "amount": float(row.get("amount", 0)),
-            })
-        result[symbol] = rows
+        df_out = df[["timestamp", "open", "high", "low", "close", "volume", "amount"]].copy()
+        df_out["timestamp"] = df_out["timestamp"].astype(str)
+        df_out["volume"] = df_out["volume"].astype(int)
+        df_out["open"] = df_out["open"].astype(float)
+        df_out["high"] = df_out["high"].astype(float)
+        df_out["low"] = df_out["low"].astype(float)
+        df_out["close"] = df_out["close"].astype(float)
+        df_out["amount"] = df_out["amount"].astype(float)
+        result[symbol] = df_out.to_dict(orient="records")
 
     return {"data": result}
 
@@ -243,3 +247,131 @@ def fetch_batch_data(req: FetchBatchRequest):
         "results": results,
         "errors": errors,
     }
+
+
+class ChartDataRequest(BaseModel):
+    symbol: str
+    start_date: str | None = None
+    end_date: str | None = None
+    period: str = "1D"
+    adjust: str = "none"
+    layers: list[dict] | None = None
+
+
+@router.post("/chart-data")
+def get_chart_data(req: ChartDataRequest):
+    """返回 OHLCV + 指标数据（给前端 ECharts 内联渲染用）。"""
+    from backend.plotting.compute import compute_indicator
+
+    try:
+        start_dt = datetime.strptime(req.start_date, "%Y-%m-%d") if req.start_date else None
+        end_dt = datetime.strptime(req.end_date, "%Y-%m-%d") if req.end_date else None
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid date format: {e}")
+
+    valid_periods = ("1min", "5min", "15min", "30min", "60min", "120min", "1D", "1W", "1M", "1Q")
+    if req.period not in valid_periods:
+        raise HTTPException(status_code=400, detail=f"Invalid period, supported: {valid_periods}")
+
+    valid_adjust = ("none", "hfq", "qfq")
+    if req.adjust not in valid_adjust:
+        raise HTTPException(status_code=400, detail=f"Invalid adjust, supported: {valid_adjust}")
+
+    data_dict = get_market_data(req.symbol, start_dt, end_dt, req.period, req.adjust)
+    df = data_dict.get(req.symbol, pd.DataFrame())
+    if df.empty:
+        return {"symbol": req.symbol, "period": req.period, "adjust": req.adjust, "ohlcv": [], "indicators": []}
+
+    df_out = df[["timestamp", "open", "high", "low", "close", "volume", "amount"]].copy()
+    df_out["timestamp"] = df_out["timestamp"].astype(str)
+    df_out["volume"] = df_out["volume"].astype(int)
+    df_out["open"] = df_out["open"].astype(float)
+    df_out["high"] = df_out["high"].astype(float)
+    df_out["low"] = df_out["low"].astype(float)
+    df_out["close"] = df_out["close"].astype(float)
+    df_out["amount"] = df_out["amount"].astype(float)
+    ohlcv = df_out.to_dict(orient="records")
+
+    if req.layers:
+        layers = [_raw_to_layerspec(raw) for raw in req.layers]
+    else:
+        layers = [_raw_to_layerspec(d) for d in DEFAULT_LAYERS]
+
+    indicators = []
+    for spec in layers:
+        ind = compute_indicator(df, spec.indicator, spec.params)
+        if spec.pane is not None:
+            ind.pane = spec.pane
+        if spec.kind is not None:
+            ind.kind = spec.kind
+        if spec.color is not None:
+            ind.color = spec.color
+        if spec.name:
+            ind.name = spec.name
+        indicators.append(indicator_series_to_dict(ind))
+
+    return {"symbol": req.symbol, "period": req.period, "adjust": req.adjust, "ohlcv": ohlcv, "indicators": indicators}
+
+
+class ChartHtmlRequest(BaseModel):
+    symbol: str
+    start_date: str | None = None
+    end_date: str | None = None
+    period: str = "1D"
+    adjust: str = "none"
+    layers: list[dict] | None = None
+    renderer: str = "pyecharts"
+
+
+@router.post("/chart-html")
+def get_chart_html(req: ChartHtmlRequest):
+    """返回完整 HTML（给 PyEcharts / LightweightCharts 新标签页用）。"""
+    try:
+        start_dt = datetime.strptime(req.start_date, "%Y-%m-%d") if req.start_date else None
+        end_dt = datetime.strptime(req.end_date, "%Y-%m-%d") if req.end_date else None
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid date format: {e}")
+
+    valid_periods = ("1min", "5min", "15min", "30min", "60min", "120min", "1D", "1W", "1M", "1Q")
+    if req.period not in valid_periods:
+        raise HTTPException(status_code=400, detail=f"Invalid period, supported: {valid_periods}")
+
+    valid_adjust = ("none", "hfq", "qfq")
+    if req.adjust not in valid_adjust:
+        raise HTTPException(status_code=400, detail=f"Invalid adjust, supported: {valid_adjust}")
+
+    valid_renderers = ("pyecharts", "lightweight")
+    if req.renderer not in valid_renderers:
+        raise HTTPException(status_code=400, detail=f"Invalid renderer, supported: {valid_renderers}")
+
+    data_dict = get_market_data(req.symbol, start_dt, end_dt, req.period, req.adjust)
+    df = data_dict.get(req.symbol, pd.DataFrame())
+    if df.empty:
+        raise HTTPException(status_code=404, detail=f"No data for {req.symbol}")
+
+    if req.layers:
+        layers = [_raw_to_layerspec(raw) for raw in req.layers]
+    else:
+        layers = [_raw_to_layerspec(d) for d in DEFAULT_LAYERS]
+
+    config = PlotConfig(
+        layers=layers,
+        show_trades=False,
+        show_equity_curve=False,
+        show_drawdown=False,
+        title=f"{req.symbol} K-Line ({req.period})",
+    )
+
+    builder = ChartBuilder(kline_df=df, config=config)
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False, encoding="utf-8") as tmp:
+        tmp_path = tmp.name
+    try:
+        try:
+            builder.render(renderer_name=req.renderer, output=tmp_path)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        with open(tmp_path, "r", encoding="utf-8") as f:
+            html = f.read()
+    finally:
+        os.unlink(tmp_path)
+    return {"html": html}

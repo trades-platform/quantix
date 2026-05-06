@@ -5,13 +5,22 @@
  * configuration instead of pyecharts calls.
  */
 
-// --- Dark theme colour constants ---
-const COLORS = {
-  bg: '#131722',
-  text: '#d1d4dc',
-  grid: '#2B2B43',
-  up: '#26a69a',
-  down: '#ef5350',
+// --- Theme colour constants ---
+const THEMES = {
+  dark: {
+    bg: '#131722',
+    text: '#d1d4dc',
+    grid: '#2B2B43',
+    up: '#26a69a',
+    down: '#ef5350',
+  },
+  light: {
+    bg: 'transparent',
+    text: '#374151',
+    grid: '#F3F4F6',
+    up: '#EF4444',
+    down: '#10B981',
+  },
 }
 
 /**
@@ -28,6 +37,8 @@ export function buildEChartsOption(ohlcv, indicators, trades, opts = {}) {
     return {}
   }
 
+  const themeName = opts.darkMode !== false ? 'dark' : 'light'
+  const COLORS = THEMES[themeName]
   const timestamps = ohlcv.map((d) => d.timestamp)
 
   // Candlestick data: [open, close, low, high]
@@ -257,7 +268,12 @@ export function buildEChartsOption(ohlcv, indicators, trades, opts = {}) {
             xAxisIndex: paneIdx,
             yAxisIndex: paneIdx,
             data: ind.data.values,
-            itemStyle: { color: ind.color || '#616161' },
+            itemStyle: {
+              color: (params) => {
+                const v = params.value
+                return v != null && v >= 0 ? COLORS.up : COLORS.down
+              },
+            },
           })
         } else if (ind.kind === 'line' && ind.data && ind.data.type === 'scalar') {
           seriesList.push({
@@ -286,6 +302,13 @@ export function buildEChartsOption(ohlcv, indicators, trades, opts = {}) {
           for (const part of bandParts) {
             // Use bar for histogram-like sub-keys (e.g. MACD histogram), line otherwise
             const isHistogramLike = part.key === 'histogram'
+            // MACD colour overrides: DIF = red, DEA = tawny/golden-rod
+            const isMacd = ind.name && ind.name.toUpperCase().startsWith('MACD')
+            let lineColor = ind.color || '#999'
+            if (!isHistogramLike && isMacd) {
+              if (part.key === 'dif') lineColor = '#FF0000'
+              if (part.key === 'dea') lineColor = '#DAA520'
+            }
             seriesList.push({
               name: `${ind.name}-${part.key}`,
               type: isHistogramLike ? 'bar' : 'line',
@@ -293,12 +316,19 @@ export function buildEChartsOption(ohlcv, indicators, trades, opts = {}) {
               yAxisIndex: paneIdx,
               data: part.values,
               ...(isHistogramLike
-                ? { itemStyle: { color: ind.color || '#616161' } }
+                ? {
+                    itemStyle: {
+                      color: (params) => {
+                        const v = params.value
+                        return v != null && v >= 0 ? COLORS.up : COLORS.down
+                      },
+                    },
+                  }
                 : {
                     smooth: true,
                     symbol: 'none',
-                    lineStyle: { width: 1, color: ind.color || '#999' },
-                    itemStyle: { color: ind.color || '#999' },
+                    lineStyle: { width: 1, color: lineColor },
+                    itemStyle: { color: lineColor },
                   }),
             })
           }
@@ -313,18 +343,13 @@ export function buildEChartsOption(ohlcv, indicators, trades, opts = {}) {
     {
       type: 'inside',
       xAxisIndex: xaxisIndices,
-      start: 50,
-      end: 100,
-    },
-    {
-      type: 'slider',
-      show: true,
-      xAxisIndex: xaxisIndices,
-      top: '93%',
-      start: 50,
-      end: 100,
     },
   ]
+
+  // Filter legend: exclude Price, Trades, Volume, and MACD sub-keys (dif/dea/histogram)
+  const legendNames = seriesList
+    .map((s) => s.name)
+    .filter((n) => n && n !== 'Trades' && n !== 'Price' && n !== 'Volume' && !n.startsWith('MACD-'))
 
   // --- Assemble option ---
   return {
@@ -332,16 +357,17 @@ export function buildEChartsOption(ohlcv, indicators, trades, opts = {}) {
     backgroundColor: COLORS.bg,
     textStyle: { color: COLORS.text },
     legend: {
-      data: seriesList.map((s) => s.name).filter((n) => n && n !== 'Trades'),
+      data: legendNames,
       top: 10,
       textStyle: { color: COLORS.text },
     },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'cross' },
-      backgroundColor: 'rgba(19, 23, 34, 0.9)',
-      borderColor: COLORS.grid,
-      textStyle: { color: COLORS.text },
+      backgroundColor: themeName === 'dark' ? 'rgba(19,23,34,0.96)' : 'rgba(255,255,255,0.96)',
+      borderColor: themeName === 'dark' ? '#2B2B43' : '#E5E7EB',
+      textStyle: { color: themeName === 'dark' ? '#d1d4dc' : '#1F2937' },
+      extraCssText: 'box-shadow: 0 2px 8px rgba(0,0,0,0.08);',
       formatter: (params) => {
         if (!params || params.length === 0) return ''
         const idx = params[0].dataIndex
@@ -364,6 +390,8 @@ export function buildEChartsOption(ohlcv, indicators, trades, opts = {}) {
     },
     axisPointer: {
       link: [{ xAxisIndex: 'all' }],
+      lineStyle: { color: '#9CA3AF' },
+      label: { color: themeName === 'dark' ? '#d1d4dc' : '#374151', backgroundColor: themeName === 'dark' ? 'rgba(19,23,34,0.9)' : 'rgba(255,255,255,0.9)' },
     },
     grid: grids,
     xAxis: xAxes,

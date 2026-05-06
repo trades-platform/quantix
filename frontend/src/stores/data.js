@@ -4,6 +4,7 @@ import { ref, computed } from 'vue'
 export const useDataStore = defineStore('data', () => {
   const symbols = ref([])
   const klineData = ref([])
+  const chartIndicators = ref([])
   const loading = ref(false)
   const error = ref(null)
   const selectedSymbol = ref(null)
@@ -46,8 +47,26 @@ export const useDataStore = defineStore('data', () => {
     }
   }
 
+  const fetchChartData = async (api, params) => {
+    loading.value = true
+    error.value = null
+    try {
+      const response = await api.getChartData(params)
+      klineData.value = response.data.ohlcv
+      chartIndicators.value = response.data.indicators
+      selectedSymbol.value = params.symbol
+      return response.data
+    } catch (err) {
+      error.value = err.message || '获取图表数据失败'
+      throw err
+    } finally {
+      loading.value = false
+    }
+  }
+
   const clearKlineData = () => {
     klineData.value = []
+    chartIndicators.value = []
     selectedSymbol.value = null
   }
 
@@ -82,6 +101,7 @@ export const useDataStore = defineStore('data', () => {
   return {
     symbols,
     klineData,
+    chartIndicators,
     loading,
     error,
     selectedSymbol,
@@ -89,6 +109,7 @@ export const useDataStore = defineStore('data', () => {
     hasData,
     fetchSymbols,
     fetchKline,
+    fetchChartData,
     clearKlineData,
     fetchSingleKline,
     fetchBatchKline

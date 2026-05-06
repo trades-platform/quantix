@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { dataApi } from '../api'
 import { useDataStore } from '../stores/data'
 import { useNotificationStore } from '../stores/notification'
@@ -7,13 +7,161 @@ import { storeToRefs } from 'pinia'
 import KlineChart from '../components/KlineChart.vue'
 
 const dataStore = useDataStore()
-const { symbols, klineData, loading, selectedSymbol, hasData } = storeToRefs(dataStore)
+const { symbols, klineData, chartIndicators, loading, selectedSymbol, hasData } = storeToRefs(dataStore)
 const notificationStore = useNotificationStore()
 
 const klineLoading = ref(false)
 const klineStats = ref(null)
 
 const searchQuery = ref('')
+
+// Chart filter state
+const chartFilter = ref({
+  period: '1D',
+  adjust: 'qfq',
+  startDate: '',
+  endDate: '',
+  renderer: 'echarts',
+})
+const activeIndicators = ref(new Set(['ma', 'volume']))
+const selectedMaPeriods = ref([5, 20])
+const isFullscreen = ref(false)
+const chartHtmlLoading = ref(false)
+const chartHtmlSrc = ref('')
+
+// --- Settings persistence ---
+const SETTINGS_KEY = 'quantix:chartSettings'
+const showSettingsPanel = ref(false)
+
+const loadSettings = () => {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw)
+    if (parsed.chartFilter) {
+      chartFilter.value = { ...chartFilter.value, ...parsed.chartFilter }
+    }
+    if (parsed.activeIndicators) {
+      activeIndicators.value = new Set(parsed.activeIndicators)
+    }
+    if (parsed.selectedMaPeriods) {
+      selectedMaPeriods.value = parsed.selectedMaPeriods
+    }
+    if (parsed.maColors) {
+      maColors.value = { ...maColors.value, ...parsed.maColors }
+    }
+  } catch (e) {
+    console.error('Failed to load chart settings', e)
+  }
+}
+
+const saveSettings = () => {
+  try {
+    const payload = {
+      chartFilter: {
+        period: chartFilter.value.period,
+        adjust: chartFilter.value.adjust,
+        renderer: chartFilter.value.renderer,
+      },
+      activeIndicators: Array.from(activeIndicators.value),
+      selectedMaPeriods: selectedMaPeriods.value,
+      maColors: maColors.value,
+    }
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(payload))
+  } catch (e) {
+    console.error('Failed to save chart settings', e)
+  }
+}
+
+const openSettings = () => {
+  showSettingsPanel.value = true
+}
+
+const closeSettings = () => {
+  showSettingsPanel.value = false
+}
+
+const confirmSettings = () => {
+  saveSettings()
+  showSettingsPanel.value = false
+}
+
+
+const periodOptions = [
+  { value: '1min', label: '1分钟' },
+  { value: '5min', label: '5分钟' },
+  { value: '15min', label: '15分钟' },
+  { value: '30min', label: '30分钟' },
+  { value: '60min', label: '60分钟' },
+  { value: '120min', label: '120分钟' },
+  { value: '1D', label: '日线' },
+  { value: '1W', label: '周线' },
+  { value: '1M', label: '月线' },
+  { value: '1Q', label: '季线' },
+]
+const adjustOptions = [
+  { value: 'none', label: '不复权' },
+  { value: 'hfq', label: '后复权' },
+  { value: 'qfq', label: '前复权' },
+]
+const rendererOptions = [
+  { value: 'echarts', label: 'ECharts（内联）' },
+  { value: 'pyecharts', label: 'PyEcharts' },
+  { value: 'lightweight', label: 'LightweightCharts' },
+]
+const indicatorOptions = [
+  { key: 'boll', label: 'BOLL' },
+  { key: 'macd', label: 'MACD' },
+  { key: 'rsi', label: 'RSI' },
+  { key: 'kdj', label: 'KDJ' },
+  { key: 'atr', label: 'ATR' },
+  { key: 'volume', label: 'Volume' },
+]
+const maPeriodOptions = [5, 10, 20, 60, 120, 250]
+const maColors = ref({
+  5: '#F59E0B',
+  10: '#3B82F6',
+  20: '#8B5CF6',
+  60: '#EC4899',
+  120: '#14B8A6',
+  250: '#F97316',
+})
+
+// Build layer specs from active indicators
+const buildLayers = () => {
+  const layers = []
+  const active = activeIndicators.value
+
+  if (active.has('ma') && selectedMaPeriods.value.length > 0) {
+    for (const period of selectedMaPeriods.value) {
+      layers.push({
+        indicator: 'ma',
+        name: `MA(${period})`,
+        params: { period },
+        color: maColors.value[period] || '#999',
+      })
+    }
+  }
+  if (active.has('boll')) {
+    layers.push({ indicator: 'boll', name: 'BOLL(20,2)', params: { period: 20, std_dev: 2.0 } })
+  }
+  if (active.has('macd')) {
+    layers.push({ indicator: 'macd', name: 'MACD(12,26,9)', params: { fast: 12, slow: 26, signal: 9 } })
+  }
+  if (active.has('rsi')) {
+    layers.push({ indicator: 'rsi', name: 'RSI(14)', params: { period: 14 } })
+  }
+  if (active.has('kdj')) {
+    layers.push({ indicator: 'kdj', name: 'KDJ(9,3,3)', params: { n: 9, m1: 3, m2: 3 } })
+  }
+  if (active.has('atr')) {
+    layers.push({ indicator: 'atr', name: 'ATR(14)', params: { period: 14 } })
+  }
+  if (active.has('volume')) {
+    layers.push({ indicator: 'volume', name: 'Volume', pane: 'volume' })
+  }
+  return layers
+}
 
 // Fetch form state
 const showFetchDialog = ref(false)
@@ -54,20 +202,53 @@ const fetchSymbols = async () => {
   }
 }
 
-const fetchKline = async () => {
+const fetchChartData = async () => {
   if (!selectedSymbol.value) return
 
   klineLoading.value = true
   try {
-    await dataStore.fetchKline(dataApi, {
+    const layers = buildLayers()
+    const params = {
       symbol: selectedSymbol.value,
-      limit: 500,
-    })
+      period: chartFilter.value.period,
+      adjust: chartFilter.value.adjust,
+      layers: layers.length > 0 ? layers : undefined,
+    }
+    if (chartFilter.value.startDate) params.start_date = chartFilter.value.startDate
+    if (chartFilter.value.endDate) params.end_date = chartFilter.value.endDate
+
+    await dataStore.fetchChartData(dataApi, params)
     calculateStats()
   } catch (error) {
-    notificationStore.error('获取K线数据失败')
+    notificationStore.error('获取图表数据失败')
   } finally {
     klineLoading.value = false
+  }
+}
+
+const handleRenderChartHtml = async () => {
+  if (!selectedSymbol.value) return
+  chartHtmlLoading.value = true
+  try {
+    const layers = buildLayers()
+    const params = {
+      symbol: selectedSymbol.value,
+      period: chartFilter.value.period,
+      adjust: chartFilter.value.adjust,
+      renderer: chartFilter.value.renderer,
+      layers: layers.length > 0 ? layers : undefined,
+    }
+    if (chartFilter.value.startDate) params.start_date = chartFilter.value.startDate
+    if (chartFilter.value.endDate) params.end_date = chartFilter.value.endDate
+
+    if (chartHtmlSrc.value) URL.revokeObjectURL(chartHtmlSrc.value)
+    const response = await dataApi.getChartHtml(params)
+    const blob = new Blob([response.data.html], { type: 'text/html' })
+    chartHtmlSrc.value = URL.createObjectURL(blob)
+  } catch (error) {
+    notificationStore.error('生成图表失败: ' + (error.response?.data?.detail || error.message))
+  } finally {
+    chartHtmlLoading.value = false
   }
 }
 
@@ -87,14 +268,10 @@ const calculateStats = () => {
     dataPoints: data.length,
     dateRange: `${first.timestamp.split('T')[0]} 至 ${last.timestamp.split('T')[0]}`,
     totalReturn: totalReturn.toFixed(2),
-    high: Math.max(...data.map((d) => d.high)).toFixed(2),
-    low: Math.min(...data.map((d) => d.low)).toFixed(2),
+    high: data.reduce((max, d) => d.high > max ? d.high : max, -Infinity).toFixed(2),
+    low: data.reduce((min, d) => d.low < min ? d.low : min, Infinity).toFixed(2),
     avgVolume: Math.round(data.reduce((sum, d) => sum + d.volume, 0) / data.length).toLocaleString(),
   }
-}
-
-const formatDate = (dateStr) => {
-  return new Date(dateStr).toLocaleString('zh-CN', { hour12: false })
 }
 
 const toLocalDateStr = (date) => {
@@ -106,9 +283,6 @@ const toLocalDateStr = (date) => {
 
 const openFetchDialog = () => {
   const today = new Date()
-  const lastMonth = new Date(today)
-  lastMonth.setMonth(lastMonth.getMonth() - 1)
-
   fetchForm.value = {
     symbol: '',
     period: 'min1',
@@ -148,9 +322,6 @@ const handleFetchKline = async () => {
 
 const openBatchFetchDialog = () => {
   const today = new Date()
-  const lastMonth = new Date(today)
-  lastMonth.setMonth(lastMonth.getMonth() - 1)
-
   batchFetchForm.value = {
     symbols: '',
     period: 'min1',
@@ -168,8 +339,8 @@ const handleBatchFetchKline = async () => {
     return
   }
 
-  const symbols = symbolsText.split(/[\n,]+/).map(s => s.trim()).filter(s => s)
-  if (symbols.length === 0) {
+  const syms = symbolsText.split(/[\n,]+/).map(s => s.trim()).filter(s => s)
+  if (syms.length === 0) {
     notificationStore.warning('请输入有效的标的代码')
     return
   }
@@ -177,7 +348,7 @@ const handleBatchFetchKline = async () => {
   batchFetching.value = true
   try {
     const result = await dataStore.fetchBatchKline(dataApi, {
-      symbols,
+      symbols: syms,
       period: batchFetchForm.value.period,
       start_date: batchFetchForm.value.startDate,
       end_date: batchFetchForm.value.endDate
@@ -200,23 +371,94 @@ const handleBatchFetchKline = async () => {
 
 const selectSymbol = (symbol) => {
   selectedSymbol.value = symbol
-  fetchKline()
+  fetchChartData()
+}
+
+const toggleIndicator = (key) => {
+  const s = new Set(activeIndicators.value)
+  if (s.has(key)) {
+    s.delete(key)
+  } else {
+    s.add(key)
+  }
+  activeIndicators.value = s
+  if (selectedSymbol.value) {
+    fetchChartData()
+  }
+}
+
+const toggleMaPeriod = (period) => {
+  const idx = selectedMaPeriods.value.indexOf(period)
+  if (idx >= 0) {
+    selectedMaPeriods.value = selectedMaPeriods.value.filter(p => p !== period)
+  } else {
+    selectedMaPeriods.value = [...selectedMaPeriods.value, period].sort((a, b) => a - b)
+  }
+  if (selectedMaPeriods.value.length === 0) {
+    const s = new Set(activeIndicators.value)
+    s.delete('ma')
+    activeIndicators.value = s
+  } else {
+    const s = new Set(activeIndicators.value)
+    s.add('ma')
+    activeIndicators.value = s
+  }
+  if (selectedSymbol.value) {
+    fetchChartData()
+  }
+}
+
+const toggleFullscreen = () => {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(() => {})
+    isFullscreen.value = true
+  } else {
+    document.exitFullscreen()
+    isFullscreen.value = false
+  }
+}
+
+const onFullscreenChange = () => {
+  isFullscreen.value = !!document.fullscreenElement
 }
 
 onMounted(() => {
+  document.addEventListener('fullscreenchange', onFullscreenChange)
+  loadSettings()
   fetchSymbols()
+})
+
+onUnmounted(() => {
+  document.removeEventListener('fullscreenchange', onFullscreenChange)
+  if (chartHtmlSrc.value) URL.revokeObjectURL(chartHtmlSrc.value)
 })
 
 watch(selectedSymbol, () => {
   if (selectedSymbol.value) {
-    fetchKline()
+    fetchChartData()
   }
 })
+
+watch(() => chartFilter.value.renderer, (val) => {
+  chartHtmlSrc.value = ''
+  saveSettings()
+  if (val !== 'echarts' && selectedSymbol.value) {
+    handleRenderChartHtml()
+  }
+  if (document.fullscreenElement) {
+    document.exitFullscreen()
+  }
+})
+
+watch(() => chartFilter.value.period, saveSettings)
+watch(() => chartFilter.value.adjust, saveSettings)
+watch(activeIndicators, saveSettings, { deep: true })
+watch(selectedMaPeriods, saveSettings, { deep: true })
 </script>
 
 <template>
-  <div class="p-4 sm:p-6 lg:p-8">
-    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
+  <div class="p-4 sm:p-6 lg:p-8 flex flex-col h-[calc(100dvh-4rem)] overflow-hidden">
+    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6 shrink-0">
       <div>
         <h1 class="text-3xl font-bold text-gray-900">数据管理</h1>
         <div class="flex items-center mt-2">
@@ -246,10 +488,10 @@ watch(selectedSymbol, () => {
       </div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-      <div class="lg:col-span-1">
-        <div class="bg-white rounded-xl shadow-sm border border-gray-100">
-          <div class="p-4 border-b">
+    <div class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div class="lg:col-span-1 h-full overflow-hidden">
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 h-full flex flex-col">
+          <div class="p-4 border-b shrink-0">
             <div class="flex space-x-2">
               <input
                 v-model="searchQuery"
@@ -270,7 +512,7 @@ watch(selectedSymbol, () => {
             </div>
           </div>
 
-          <div class="max-h-96 overflow-y-auto">
+          <div class="flex-1 overflow-auto min-h-0">
             <div v-if="loading" class="p-8 text-center text-gray-500">
               <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
               <p class="mt-2">加载中...</p>
@@ -331,7 +573,7 @@ watch(selectedSymbol, () => {
             </div>
           </div>
 
-          <div class="p-4 border-t bg-gray-50">
+          <div class="p-4 border-t bg-gray-50 shrink-0">
             <div class="flex justify-between text-sm">
               <span class="text-gray-600">总计:</span>
               <span class="font-medium">{{ symbols.length }} 个标的</span>
@@ -340,8 +582,8 @@ watch(selectedSymbol, () => {
         </div>
       </div>
 
-      <div class="lg:col-span-2">
-        <div v-if="!selectedSymbol" class="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
+      <div class="lg:col-span-2 h-full overflow-hidden">
+        <div v-if="!selectedSymbol" class="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center h-full flex items-center justify-center">
           <svg class="mx-auto h-16 w-16 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
           </svg>
@@ -349,8 +591,8 @@ watch(selectedSymbol, () => {
           <p class="mt-2 text-gray-500">从左侧列表选择一个标的查看K线数据</p>
         </div>
 
-        <div v-else>
-          <div v-if="klineStats" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div v-else class="h-full flex flex-col overflow-hidden">
+          <div v-if="klineStats" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 shrink-0">
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
               <p class="text-xs text-gray-500">数据点数</p>
               <p class="text-lg font-bold mt-1 text-gray-900">{{ klineStats.dataPoints }}</p>
@@ -371,67 +613,126 @@ watch(selectedSymbol, () => {
             </div>
           </div>
 
-          <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-            <div class="flex justify-between items-center mb-4">
-              <h3 class="text-lg font-semibold">K线图表 - {{ selectedSymbol }}</h3>
-              <span v-if="klineStats" class="text-sm text-gray-600">{{ klineStats.dateRange }}</span>
+          <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex-1 flex flex-col min-h-0 overflow-hidden" :class="{ 'fixed inset-0 z-50 rounded-none p-4': isFullscreen }">
+            <!-- Chart control bar row 1: period / adjust / date range / renderer -->
+            <div class="flex flex-wrap items-center gap-3 mb-2 shrink-0">
+              <select
+                v-model="chartFilter.period"
+                @change="fetchChartData"
+                class="px-3 py-1.5 border rounded-lg text-sm bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white"
+              >
+                <option v-for="opt in periodOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+              </select>
+
+              <select
+                v-model="chartFilter.adjust"
+                @change="fetchChartData"
+                class="px-3 py-1.5 border rounded-lg text-sm bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white"
+              >
+                <option v-for="opt in adjustOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+              </select>
+
+              <input
+                v-model="chartFilter.startDate"
+                type="date"
+                placeholder="开始日期"
+                class="px-3 py-1.5 border rounded-lg text-sm bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white"
+                @change="fetchChartData"
+              />
+              <span class="text-gray-400 text-sm">至</span>
+              <input
+                v-model="chartFilter.endDate"
+                type="date"
+                placeholder="结束日期"
+                class="px-3 py-1.5 border rounded-lg text-sm bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white"
+                @change="fetchChartData"
+              />
+
+              <button
+                @click="fetchChartData"
+                :disabled="klineLoading"
+                class="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                查询
+              </button>
             </div>
-            <KlineChart v-if="hasData && !klineLoading" :data="klineData" height="400px" />
-            <div v-else-if="klineLoading" class="h-64 flex items-center justify-center text-gray-500">
+
+            <!-- Chart control bar row 2: settings button + active summary -->
+            <div class="flex flex-wrap items-center gap-2 mb-2 shrink-0">
+              <button
+                @click="openSettings"
+                class="px-3 py-1.5 text-sm rounded-lg border border-gray-300 hover:border-gray-400 hover:bg-gray-50 transition-all flex items-center gap-1.5"
+                title="图表设置"
+              >
+                <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                设置
+              </button>
+
+              <span v-if="selectedMaPeriods.length > 0" class="text-xs text-gray-500">
+                MA:
+                <span
+                  v-for="p in selectedMaPeriods"
+                  :key="p"
+                  class="inline-block w-2 h-2 rounded-full mx-0.5"
+                  :style="{ backgroundColor: maColors[p] }"
+                />
+              </span>
+
+              <span v-if="activeIndicators.size > 0" class="text-xs text-gray-500">
+                指标:
+                <span
+                  v-for="ind in indicatorOptions.filter(i => activeIndicators.has(i.key))"
+                  :key="ind.key"
+                  class="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] mx-0.5"
+                >
+                  {{ ind.label }}
+                </span>
+              </span>
+            </div>
+
+            <div v-if="klineStats" class="flex items-center justify-between mb-2 shrink-0">
+              <span class="text-sm text-gray-500">{{ selectedSymbol }} · {{ klineStats.dateRange }} · {{ klineStats.dataPoints }} bars</span>
+              <button
+                @click="toggleFullscreen"
+                class="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-400 hover:text-gray-600"
+                :title="isFullscreen ? '退出全屏' : '全屏显示'"
+              >
+                <svg v-if="!isFullscreen" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4m10 10V4m0 0h-4m1 10H3a1 1 0 01-1-1V3a1 1 0 011-1h1m14 10a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h2m10 10V17" />
+                </svg>
+                <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 9V4.5M9 9H4.5M9 14L4.5 19M9 14h4.5M15 9h4.5M15 9V4.5M15 14l4.5 5M15 14h4.5" />
+                </svg>
+              </button>
+            </div>
+
+            <KlineChart v-if="hasData && !klineLoading && chartFilter.renderer === 'echarts'" :data="klineData" :indicators="chartIndicators" :height="isFullscreen ? 'calc(100vh - 180px)' : '100%'" :dark-mode="false" class="flex-1 min-h-0" />
+            <div v-else-if="chartHtmlLoading && chartFilter.renderer !== 'echarts'" class="flex-1 flex items-center justify-center text-gray-500 min-h-0">
+              <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+              <span class="ml-2">渲染中...</span>
+            </div>
+            <iframe
+              v-else-if="chartHtmlSrc && chartFilter.renderer !== 'echarts'"
+              :src="chartHtmlSrc"
+              class="w-full border-0 rounded-lg flex-1 min-h-0"
+              :style="{ height: isFullscreen ? 'calc(100vh - 180px)' : '100%' }"
+              sandbox="allow-scripts"
+            ></iframe>
+            <div v-else-if="chartFilter.renderer !== 'echarts'" class="flex-1 flex items-center justify-center text-gray-500 min-h-0">
+              暂无图表
+            </div>
+            <div v-else-if="klineLoading" class="flex-1 flex items-center justify-center text-gray-500 min-h-0">
               <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
               <span class="ml-2">加载中...</span>
             </div>
-            <div v-else class="h-64 flex items-center justify-center text-gray-500">
+            <div v-else class="flex-1 flex items-center justify-center text-gray-500 min-h-0">
               暂无K线数据
             </div>
           </div>
 
-          <div class="mt-6 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-            <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
-              <h3 class="text-lg font-semibold">数据明细</h3>
-              <span class="text-sm text-gray-500">显示最近 20 条</span>
-            </div>
-            <div class="overflow-x-auto">
-              <table class="min-w-full">
-                <thead class="bg-gray-50">
-                  <tr>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">日期</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">开盘</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">最高</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">最低</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">收盘</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">成交量</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">涨跌</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200 bg-white">
-                  <tr v-if="klineData.length === 0 && !klineLoading">
-                    <td colspan="7" class="px-6 py-8 text-center text-gray-500">暂无数据</td>
-                  </tr>
-                  <tr v-else v-for="(bar, index) in klineData.slice(0, 20)" :key="index" class="hover:bg-gray-50 transition-colors">
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {{ formatDate(bar.timestamp) }}
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ bar.open?.toFixed(2) }}</td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-red-600">{{ bar.high?.toFixed(2) }}</td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-green-600">{{ bar.low?.toFixed(2) }}</td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium" :class="bar.close >= bar.open ? 'text-red-600' : 'text-green-600'">
-                      {{ bar.close?.toFixed(2) }}
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ bar.volume?.toLocaleString() }}</td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm">
-                      <span
-                        class="px-2 py-1 text-xs rounded"
-                        :class="(bar.close - bar.open) / bar.open >= 0 ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'"
-                      >
-                        {{ ((bar.close - bar.open) / bar.open * 100).toFixed(2) }}%
-                      </span>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -587,6 +888,109 @@ watch(selectedSymbol, () => {
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
               {{ batchFetching ? '获取中...' : '批量获取' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="showSettingsPanel"
+        class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+        @click.self="closeSettings"
+      >
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+          <div class="px-6 py-4 border-b flex justify-between items-center">
+            <h2 class="text-xl font-semibold">图表设置</h2>
+            <button
+              @click="closeSettings"
+              class="text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div class="p-6 space-y-6">
+            <!-- MA Periods -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">MA 周期</label>
+              <div class="flex flex-wrap gap-3">
+                <div
+                  v-for="p in maPeriodOptions"
+                  :key="p"
+                  class="flex items-center gap-1.5"
+                >
+                  <button
+                    @click="toggleMaPeriod(p)"
+                    class="px-3 py-1 text-xs rounded-full border transition-all font-medium"
+                    :class="selectedMaPeriods.includes(p)
+                      ? 'text-white border-transparent'
+                      : 'bg-white text-gray-500 border-gray-300 hover:border-gray-400'"
+                    :style="selectedMaPeriods.includes(p) ? { backgroundColor: maColors[p], borderColor: maColors[p] } : {}"
+                  >
+                    MA{{ p }}
+                  </button>
+                  <label class="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="color"
+                      v-model="maColors[p]"
+                      class="sr-only"
+                    />
+                    <span
+                      class="w-4 h-4 rounded-full border border-gray-300 inline-block"
+                      :style="{ backgroundColor: maColors[p] }"
+                      title="自定义颜色"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- Indicators -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">技术指标</label>
+              <div class="flex flex-wrap gap-2">
+                <button
+                  v-for="ind in indicatorOptions"
+                  :key="ind.key"
+                  @click="toggleIndicator(ind.key)"
+                  class="px-3 py-1 text-xs rounded-full border transition-all font-medium"
+                  :class="activeIndicators.has(ind.key)
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-white text-gray-500 border-gray-300 hover:border-blue-400'"
+                >
+                  {{ ind.label }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Renderer -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">渲染引擎</label>
+              <select
+                v-model="chartFilter.renderer"
+                class="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white"
+              >
+                <option v-for="opt in rendererOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="px-6 py-4 bg-gray-50 flex justify-end space-x-3">
+            <button
+              @click="closeSettings"
+              class="px-4 py-2 border rounded-lg hover:bg-gray-100 transition-colors"
+            >
+              取消
+            </button>
+            <button
+              @click="confirmSettings"
+              class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              确定
             </button>
           </div>
         </div>

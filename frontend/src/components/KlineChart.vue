@@ -44,10 +44,14 @@ const props = defineProps({
     type: String,
     default: '400px',
   },
+  darkMode: {
+    type: Boolean,
+    default: true,
+  },
 })
 
 const chartOption = computed(() => {
-  return buildEChartsOption(props.data, props.indicators, props.trades)
+  return buildEChartsOption(props.data, props.indicators, props.trades, { darkMode: props.darkMode })
 })
 </script>
 

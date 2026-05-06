@@ -104,6 +104,15 @@ export const mockApi = {
         success: true
       }))
       return { data: { results, total: results.reduce((sum, r) => sum + r.count, 0) } }
+    },
+    getChartData: async (params) => {
+      await delay(500)
+      const ohlcv = generateMockKlineData(params.symbol, 100)
+      return { data: { symbol: params.symbol, period: params.period, adjust: params.adjust, ohlcv, indicators: [] } }
+    },
+    getChartHtml: async (params) => {
+      await delay(1000)
+      return { data: { html: '<html><body><h1>Mock Chart HTML</h1></body></html>' } }
     }
   }
 }
@@ -134,6 +143,8 @@ export const backtestApi = {
 export const dataApi = {
   getSymbols: () => USE_MOCK ? mockApi.data.getSymbols() : api.get('/data/symbols'),
   getKline: (params) => USE_MOCK ? mockApi.data.getKline(params) : api.get('/data/kline', { params }),
+  getChartData: (data) => USE_MOCK ? mockApi.data.getChartData(data) : api.post('/data/chart-data', data),
+  getChartHtml: (data) => USE_MOCK ? mockApi.data.getChartHtml(data) : api.post('/data/chart-html', data),
   fetchKline: (data) => USE_MOCK ? mockApi.data.fetchKline(data) : api.post('/data/kline/fetch', data),
   fetchKlineBatch: (data) => USE_MOCK ? mockApi.data.fetchKlineBatch(data) : api.post('/data/kline/fetch-batch', data),
 }

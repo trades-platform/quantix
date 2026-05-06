@@ -14,12 +14,12 @@ from backend.plotting.types import (
 
 
 class ChartBuilder:
-    """Builds a chart from backtest results and K-line data."""
+    """Builds a chart from K-line data, optionally with backtest results."""
 
     def __init__(
         self,
-        result: dict,
         kline_df: "pd.DataFrame",
+        result: dict | None = None,
         config: PlotConfig | None = None,
     ):
         self.result = result
@@ -49,11 +49,11 @@ class ChartBuilder:
             series.append(ind)
 
         n_bars = len(self.kline_df)
-        if self.config.show_equity_curve:
-            series.append(compute_equity_curve(self.result.get("equity_curve", []), n_bars))
-
-        if self.config.show_drawdown:
-            series.append(compute_drawdown(self.result.get("equity_curve", []), n_bars))
+        if self.result is not None:
+            if self.config.show_equity_curve:
+                series.append(compute_equity_curve(self.result.get("equity_curve", []), n_bars))
+            if self.config.show_drawdown:
+                series.append(compute_drawdown(self.result.get("equity_curve", []), n_bars))
 
         return series
 
@@ -84,7 +84,7 @@ class ChartBuilder:
         result = renderer.render(
             ohlcv_df=self.kline_df,
             indicators=self.indicators,
-            trades=self.result.get("trades", []),
+            trades=self.result.get("trades", []) if self.result else [],
             config=self.config,
         )
 
