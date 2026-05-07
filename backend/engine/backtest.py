@@ -257,14 +257,17 @@ class BacktestEngine:
             context.datetime = str(ts)
 
             # --- 步骤 1：在当前 bar 开盘价执行上一根 bar 的挂单 ---
+            unexecuted = []
             for order in pending_orders:
                 sym = order.get("symbol")
                 if sym in current_bars:
                     portfolio.execute_order(order, current_bars[sym].open)
+                else:
+                    # 标的当日无 bar（停牌/跨市场休市）, 保留订单等待下次执行
+                    unexecuted.append(order)
                 # 每笔订单执行后立即同步持仓到上下文
                 context.positions = portfolio.positions.copy()
                 context.cash = portfolio.cash
-            pending_orders = []
 
             # --- 步骤 2：更新技术指标（增量，仅更新当前行索引）---
             for symbol in current_bars:
@@ -275,8 +278,8 @@ class BacktestEngine:
             # --- 步骤 3：执行策略，生成新信号 ---
             orders = executor.handle_bar(context)
 
-            # --- 步骤 4：新订单挂起，下一根 bar 开盘执行 ---
-            pending_orders = orders
+            # --- 步骤 4：新订单合并到挂起队列，下一根 bar 开盘执行 ---
+            pending_orders = unexecuted + orders
 
             # --- 步骤 5：更新组合价值 ---
             # 更新最新已知收盘价，缺失标的用上次价格估值

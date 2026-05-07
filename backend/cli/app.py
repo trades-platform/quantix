@@ -520,10 +520,15 @@ def run_backtest_file_cmd(
     # 查询行情数据
     start_dt = datetime.strptime(start_date, "%Y-%m-%d")
     end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+    # 拉取原始1min数据，由引擎内部按 user 指定的 period 重采样。
+    # 避免 get_market_data 和引擎双重重采样导致数据不一致。
     data_dict = get_market_data(symbols, start_dt, end_dt, period="1min", adjust=adjust)
 
+    missing = [s for s in symbols if s not in data_dict]
+    if missing:
+        typer.echo(f"警告: 以下标的数据缺失: {', '.join(missing)}", err=True)
     if not data_dict:
-        typer.echo(f"无 {symbol} 的K线数据", err=True)
+        typer.echo("无任何标的的K线数据", err=True)
         raise typer.Exit(1)
 
     # 解析策略参数
