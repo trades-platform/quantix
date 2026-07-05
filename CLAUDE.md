@@ -38,20 +38,42 @@
 
 ## 开发
 
-### 启动后端（开发模式，热重载）
+### 一键启动（推荐）
+
+使用 `scripts/server.sh` 同时管理后端和前端（start / stop / restart / status）：
+
+```bash
+# 开发模式：后端热重载 + Vite 前端，默认 0.0.0.0:9000
+scripts/server.sh start
+
+# 发布模式：构建前端，多 worker，由 FastAPI 托管静态文件
+scripts/server.sh start --release --workers 4
+
+# 停止 / 重启 / 查看状态
+scripts/server.sh stop
+scripts/server.sh restart
+scripts/server.sh status
+
+# 自定义端口（前端代理会自动跟随后端端口）
+scripts/server.sh start --dev --port 9001 --frontend-port 5174
+```
+
+### 分别启动
+
+后端（开发模式，热重载）：
 
 ```bash
 source .venv/bin/activate
-uvicorn backend.main:app --host 0.0.0.0 --reload
+uvicorn backend.main:app --host 0.0.0.0 --port 9000 --reload
 ```
 
-### 启动前端（开发模式，热更新）
+前端（开发模式，热更新）：
 
 ```bash
 cd frontend && pnpm dev
 ```
 
-开发时前端和后端分别启动，前端 dev server 代理 API 请求到后端。
+开发时前端和后端分别启动，前端 dev server 代理 `/api` 请求到后端（默认 9000）。
 
 ## 部署
 
@@ -61,14 +83,14 @@ cd frontend && pnpm dev
 # 1. 构建前端
 cd frontend && pnpm build
 
-# 2. 启动服务（默认监听 0.0.0.0:8000）
+# 2. 启动服务（默认监听 0.0.0.0:9000）
 source ../.venv/bin/activate
 quantix serve
 # 或指定端口
 quantix serve --port 3000
 ```
 
-访问 `http://<host>:8000` 即可同时使用前端页面和 API。
+访问 `http://<host>:9000` 即可同时使用前端页面和 API。
 
 ## CLI 回测约定
 

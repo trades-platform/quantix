@@ -53,7 +53,7 @@ app.add_typer(data_app, name="data")
 
 
 @app.command()
-def serve(host: str = "0.0.0.0", port: int = 8000):
+def serve(host: str = "0.0.0.0", port: int = 9000):
     """启动 API 服务"""
     import uvicorn
 
