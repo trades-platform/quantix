@@ -21,13 +21,10 @@ const chartFilter = ref({
   adjust: 'qfq',
   startDate: '',
   endDate: '',
-  renderer: 'echarts',
 })
 const activeIndicators = ref(new Set(['ma', 'volume']))
 const selectedMaPeriods = ref([5, 20])
 const isFullscreen = ref(false)
-const chartHtmlLoading = ref(false)
-const chartHtmlSrc = ref('')
 
 // --- Settings persistence ---
 const SETTINGS_KEY = 'quantix:chartSettings'
@@ -61,7 +58,6 @@ const saveSettings = () => {
       chartFilter: {
         period: chartFilter.value.period,
         adjust: chartFilter.value.adjust,
-        renderer: chartFilter.value.renderer,
       },
       activeIndicators: Array.from(activeIndicators.value),
       selectedMaPeriods: selectedMaPeriods.value,
@@ -103,11 +99,6 @@ const adjustOptions = [
   { value: 'none', label: '不复权' },
   { value: 'hfq', label: '后复权' },
   { value: 'qfq', label: '前复权' },
-]
-const rendererOptions = [
-  { value: 'echarts', label: 'ECharts（内联）' },
-  { value: 'pyecharts', label: 'PyEcharts' },
-  { value: 'lightweight', label: 'LightweightCharts' },
 ]
 const indicatorOptions = [
   { key: 'boll', label: 'BOLL' },
@@ -248,32 +239,6 @@ const fetchChartData = async () => {
     notificationStore.error('获取图表数据失败')
   } finally {
     klineLoading.value = false
-  }
-}
-
-const handleRenderChartHtml = async () => {
-  if (!selectedSymbol.value) return
-  chartHtmlLoading.value = true
-  try {
-    const layers = buildLayers()
-    const params = {
-      symbol: selectedSymbol.value,
-      period: chartFilter.value.period,
-      adjust: chartFilter.value.adjust,
-      renderer: chartFilter.value.renderer,
-      layers: layers.length > 0 ? layers : undefined,
-    }
-    if (chartFilter.value.startDate) params.start_date = chartFilter.value.startDate
-    if (chartFilter.value.endDate) params.end_date = chartFilter.value.endDate
-
-    if (chartHtmlSrc.value) URL.revokeObjectURL(chartHtmlSrc.value)
-    const response = await dataApi.getChartHtml(params)
-    const blob = new Blob([response.data.html], { type: 'text/html' })
-    chartHtmlSrc.value = URL.createObjectURL(blob)
-  } catch (error) {
-    notificationStore.error('生成图表失败: ' + (error.response?.data?.detail || error.message))
-  } finally {
-    chartHtmlLoading.value = false
   }
 }
 
@@ -455,23 +420,11 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('fullscreenchange', onFullscreenChange)
-  if (chartHtmlSrc.value) URL.revokeObjectURL(chartHtmlSrc.value)
 })
 
 watch(selectedSymbol, () => {
   if (selectedSymbol.value) {
     fetchChartData()
-  }
-})
-
-watch(() => chartFilter.value.renderer, (val) => {
-  chartHtmlSrc.value = ''
-  saveSettings()
-  if (val !== 'echarts' && selectedSymbol.value) {
-    handleRenderChartHtml()
-  }
-  if (document.fullscreenElement) {
-    document.exitFullscreen()
   }
 })
 
@@ -746,21 +699,7 @@ watch(selectedMaPeriods, saveSettings, { deep: true })
               </button>
             </div>
 
-            <KlineChart v-if="hasData && !klineLoading && chartFilter.renderer === 'echarts'" :data="klineData" :indicators="chartIndicators" :height="isFullscreen ? 'calc(100vh - 180px)' : '100%'" :dark-mode="false" class="flex-1 min-h-0" />
-            <div v-else-if="chartHtmlLoading && chartFilter.renderer !== 'echarts'" class="flex-1 flex items-center justify-center text-gray-500 min-h-0">
-              <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-              <span class="ml-2">渲染中...</span>
-            </div>
-            <iframe
-              v-else-if="chartHtmlSrc && chartFilter.renderer !== 'echarts'"
-              :src="chartHtmlSrc"
-              class="w-full border-0 rounded-lg flex-1 min-h-0"
-              :style="{ height: isFullscreen ? 'calc(100vh - 180px)' : '100%' }"
-              sandbox="allow-scripts"
-            ></iframe>
-            <div v-else-if="chartFilter.renderer !== 'echarts'" class="flex-1 flex items-center justify-center text-gray-500 min-h-0">
-              暂无图表
-            </div>
+            <KlineChart v-if="hasData && !klineLoading" :data="klineData" :indicators="chartIndicators" :height="isFullscreen ? 'calc(100vh - 180px)' : '100%'" :dark-mode="false" class="flex-1 min-h-0" />
             <div v-else-if="klineLoading" class="flex-1 flex items-center justify-center text-gray-500 min-h-0">
               <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
               <span class="ml-2">加载中...</span>
@@ -1042,17 +981,6 @@ watch(selectedMaPeriods, saveSettings, { deep: true })
                   {{ ind.label }}
                 </button>
               </div>
-            </div>
-
-            <!-- Renderer -->
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-2">渲染引擎</label>
-              <select
-                v-model="chartFilter.renderer"
-                class="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white"
-              >
-                <option v-for="opt in rendererOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-              </select>
             </div>
           </div>
 

@@ -62,36 +62,3 @@ class ChartBuilder:
         if self._indicators_cache is None:
             self._indicators_cache = self._build_indicators()
         return self._indicators_cache
-
-    def render(
-        self,
-        renderer_name: str = "pyecharts",
-        output: str | None = None,
-        show: bool = False,
-    ) -> "RenderResult":
-        try:
-            import backend.plotting.renderers.pyecharts  # noqa: F401
-        except ImportError:
-            pass
-        try:
-            import backend.plotting.renderers.lightweight  # noqa: F401
-        except ImportError:
-            pass
-
-        from backend.plotting.renderers import get_renderer
-
-        renderer = get_renderer(renderer_name)
-        result = renderer.render(
-            ohlcv_df=self.kline_df,
-            indicators=self.indicators,
-            trades=self.result.get("trades", []) if self.result else [],
-            config=self.config,
-        )
-
-        if output:
-            renderer.save(result, output)
-
-        if show and hasattr(renderer, "show"):
-            renderer.show(result)
-
-        return result

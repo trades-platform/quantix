@@ -1,31 +1,6 @@
 <script setup>
-import { computed } from 'vue'
-import { use } from 'echarts/core'
-import { CanvasRenderer } from 'echarts/renderers'
-import { CandlestickChart, LineChart, BarChart } from 'echarts/charts'
-import {
-  TitleComponent,
-  TooltipComponent,
-  LegendComponent,
-  GridComponent,
-  DataZoomComponent,
-  MarkPointComponent,
-} from 'echarts/components'
-import VChart from 'vue-echarts'
-import { buildEChartsOption } from '../utils/echartsBuilder'
-
-use([
-  CanvasRenderer,
-  CandlestickChart,
-  LineChart,
-  BarChart,
-  TitleComponent,
-  TooltipComponent,
-  LegendComponent,
-  GridComponent,
-  DataZoomComponent,
-  MarkPointComponent,
-])
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { createLightweightRenderer } from '../utils/lightweightRenderer'
 
 const props = defineProps({
   data: {
@@ -50,11 +25,31 @@ const props = defineProps({
   },
 })
 
-const chartOption = computed(() => {
-  return buildEChartsOption(props.data, props.indicators, props.trades, { darkMode: props.darkMode })
+const container = ref(null)
+let renderer = null
+let observer = null
+
+const renderCurrent = () => {
+  if (!renderer) return
+  renderer.render({ ohlcv: props.data, indicators: props.indicators, trades: props.trades })
+}
+
+onMounted(() => {
+  renderer = createLightweightRenderer(container.value, { darkMode: props.darkMode })
+  renderCurrent()
+  observer = new ResizeObserver(() => renderer && renderer.resize())
+  if (container.value) observer.observe(container.value)
+})
+
+watch(() => [props.data, props.indicators, props.trades], renderCurrent, { deep: true })
+
+onBeforeUnmount(() => {
+  observer && observer.disconnect()
+  renderer && renderer.dispose()
+  renderer = null
 })
 </script>
 
 <template>
-  <v-chart :style="{ height }" :option="chartOption" autoresize />
+  <div ref="container" class="w-full" :style="{ height }"></div>
 </template>
