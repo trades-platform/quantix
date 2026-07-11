@@ -35,6 +35,7 @@
 - Python 3.12
 - uv (Python 包管理，安装在 .venv 内)
 - pnpm (前端包管理)
+- git-lfs：clone/pull 后必须 `git lfs pull` 拉取 `wheels/*.whl`（tgw / AmazingData 行情 SDK，体积大，由 LFS 跟踪）。否则 wheel 只是指针文件，`uv sync` 会报 `Failed to read from zip file`。这两个 SDK 已在 `pyproject.toml` 声明并通过 `[tool.uv] find-links = ["wheels"]` 从本地 wheel 解析。
 
 ## 开发
 

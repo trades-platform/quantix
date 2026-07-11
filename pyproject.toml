@@ -15,7 +15,15 @@ dependencies = [
     "python-multipart>=0.0.9",
     "tables>=3.9",
     "prettytable>=3.10",
+    # 行情数据 SDK：wheel 在 wheels/ 目录（git-lfs 跟踪），见 [tool.uv] find-links
+    "amazingdata>=1.0.17",
+    "tgw>=1.0.8.1",
+    "scipy",  # AmazingData 未在 wheel 中声明 Requires-Dist，需显式补上
 ]
+
+[tool.uv]
+# 本地 wheel 索引：tgw / amazingdata 从 wheels/ 解析，避免 uv sync 误删
+find-links = ["wheels"]
 
 [dependency-groups]
 dev = [
