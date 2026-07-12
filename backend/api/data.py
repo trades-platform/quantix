@@ -302,9 +302,12 @@ def get_chart_data(req: ChartDataRequest):
     else:
         layers = [_raw_to_layerspec(d) for d in DEFAULT_LAYERS]
 
+    from backend.plotting.compute import enrich_for_layers
+
+    enriched = enrich_for_layers(df, layers)
     indicators = []
     for spec in layers:
-        ind = compute_indicator(df, spec.indicator, spec.params)
+        ind = compute_indicator(enriched, spec.indicator, spec.params)
         if spec.pane is not None:
             ind.pane = spec.pane
         if spec.kind is not None:

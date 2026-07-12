@@ -1,4 +1,8 @@
-"""指标序列计算 — 向量化实现，与 SymbolIndicators 公式一致"""
+"""指标序列计算 — 向量化实现，公式统一来自 core-ti（见 backend.engine.ti）
+
+与回测引擎的 SymbolIndicators 共用同一个 core-ti 引擎，保证图表与
+回测指标口径完全一致。
+"""
 
 from __future__ import annotations
 
@@ -7,6 +11,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 
+from backend.engine import ti
 from backend.plotting.types import (
     BandSeries,
     IndicatorSeries,
@@ -17,48 +22,29 @@ from backend.plotting.types import (
 )
 
 
-def _mask_before_period(series: pd.Series, period: int) -> pd.Series:
-    """匹配 SymbolIndicators 行为：数据不足 period 时无有效值"""
-    result = series.copy()
-    result.iloc[:period] = np.nan
-    return result
-
-
 def compute_ma(df: pd.DataFrame, period: int = 5, name: str | None = None,
                pane: str = MAIN, color: str | None = None) -> IndicatorSeries:
-    # SymbolIndicators: data["close"].tail(period).mean()
-    raw = df["close"].rolling(period, min_periods=period).mean()
-    data = _mask_before_period(raw, period).tolist()
+    col = ti.compute(df, "sma", {"period": period}).iloc[:, 0]
     return IndicatorSeries(
         name=name or f"MA({period})", pane=pane, kind=SeriesKind.LINE,
-        data=ScalarSeries(data=data), color=color,
+        data=ScalarSeries(data=col.tolist()), color=color,
     )
 
 
 def compute_ema(df: pd.DataFrame, period: int = 20, name: str | None = None,
                 pane: str = MAIN, color: str | None = None) -> IndicatorSeries:
-    # SymbolIndicators: data["close"].ewm(span=period, adjust=False).mean()
-    raw = df["close"].ewm(span=period, adjust=False).mean()
-    data = _mask_before_period(raw, period).tolist()
+    col = ti.compute(df, "ema", {"period": period}).iloc[:, 0]
     return IndicatorSeries(
         name=name or f"EMA({period})", pane=pane, kind=SeriesKind.LINE,
-        data=ScalarSeries(data=data), color=color,
+        data=ScalarSeries(data=col.tolist()), color=color,
     )
 
 
 def compute_boll(df: pd.DataFrame, period: int = 20, std_dev: float = 2.0,
                  name: str | None = None, pane: str = MAIN,
                  color: str | None = None) -> IndicatorSeries:
-    # SymbolIndicators: close_tail = data["close"].tail(period), mean + std_dev * std
-    rolling = df["close"].rolling(period, min_periods=period)
-    middle = rolling.mean()
-    std = rolling.std(ddof=0)
-    upper = middle + std_dev * std
-    lower = middle - std_dev * std
-    # NaN for insufficient data
-    middle = middle.fillna(np.nan)
-    upper = upper.fillna(np.nan)
-    lower = lower.fillna(np.nan)
+    bands = ti.compute(df, "bb", {"period": period, "std": std_dev})
+    upper, middle, lower = bands.iloc[:, 0], bands.iloc[:, 1], bands.iloc[:, 2]
     return IndicatorSeries(
         name=name or f"BOLL({period},{std_dev})", pane=pane, kind=SeriesKind.BAND,
         data=BandSeries(upper=upper.tolist(), middle=middle.tolist(), lower=lower.tolist()),
@@ -69,13 +55,8 @@ def compute_boll(df: pd.DataFrame, period: int = 20, std_dev: float = 2.0,
 def compute_macd(df: pd.DataFrame, fast: int = 12, slow: int = 26, signal: int = 9,
                  name: str | None = None, pane: str = "macd",
                  color: str | None = None) -> IndicatorSeries:
-    # SymbolIndicators: ewm(span=fast, adjust=False) - ewm(span=slow, adjust=False)
-    close = df["close"]
-    ema_fast = close.ewm(span=fast, adjust=False).mean()
-    ema_slow = close.ewm(span=slow, adjust=False).mean()
-    dif = ema_fast - ema_slow
-    dea = dif.ewm(span=signal, adjust=False).mean()
-    hist = dif - dea
+    macd = ti.compute(df, "macd", {"fast": fast, "slow": slow, "signal": signal})
+    dif, dea, hist = macd.iloc[:, 0], macd.iloc[:, 1], macd.iloc[:, 2]
     return IndicatorSeries(
         name=name or f"MACD({fast},{slow},{signal})", pane=pane, kind=SeriesKind.BAND,
         data=BandSeries(extra={"dif": dif.tolist(), "dea": dea.tolist(), "histogram": hist.tolist()}),
@@ -85,68 +66,19 @@ def compute_macd(df: pd.DataFrame, fast: int = 12, slow: int = 26, signal: int =
 
 def compute_rsi(df: pd.DataFrame, period: int = 14, name: str | None = None,
                 pane: str = "rsi", color: str | None = None) -> IndicatorSeries:
-    # SymbolIndicators: gain.tail(period).mean() / loss.tail(period).mean() (SMA RSI)
-    close = df["close"]
-    delta = close.diff()
-    gain = delta.where(delta > 0, 0.0)
-    loss = -delta.where(delta < 0, 0.0)
-
-    # Match the SMA-based RSI from SymbolIndicators (not Wilder EMA smoothing)
-    avg_gain = gain.rolling(period).mean()
-    avg_loss = loss.rolling(period).mean()
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-
-    # Before we have `period` data points, SymbolIndicators returns NaN
-    rsi.iloc[:period] = np.nan
-
+    col = ti.compute(df, "rsi", {"period": period}).iloc[:, 0]
     return IndicatorSeries(
         name=name or f"RSI({period})", pane=pane, kind=SeriesKind.LINE,
-        data=ScalarSeries(data=rsi.tolist()), color=color or "#FF9800",
-    )
-
-
-def compute_kdj(df: pd.DataFrame, n: int = 9, m1: int = 3, m2: int = 3,
-                name: str | None = None, pane: str = "kdj",
-                color: str | None = None) -> IndicatorSeries:
-    # Match SymbolIndicators KDJ: cumulative smoothing from 50.0
-    k_vals, d_vals, j_vals = [np.nan] * len(df), [np.nan] * len(df), [np.nan] * len(df)
-    k, d = 50.0, 50.0
-    alpha_k = 1.0 / m1
-    alpha_d = 1.0 / m2
-
-    for i in range(n - 1, len(df)):
-        window = df.iloc[max(0, i - n + 1):i + 1]
-        highest = window["high"].max()
-        lowest = window["low"].min()
-        rsv = 50.0 if highest == lowest else 100.0 * (window["close"].iloc[-1] - lowest) / (highest - lowest)
-        k = (1 - alpha_k) * k + alpha_k * rsv
-        d = (1 - alpha_d) * d + alpha_d * k
-        k_vals[i] = k
-        d_vals[i] = d
-        j_vals[i] = 3 * k - 2 * d
-
-    return IndicatorSeries(
-        name=name or f"KDJ({n},{m1},{m2})", pane=pane, kind=SeriesKind.BAND,
-        data=BandSeries(extra={"k": k_vals, "d": d_vals, "j": j_vals}),
-        color=color,
+        data=ScalarSeries(data=col.tolist()), color=color or "#FF9800",
     )
 
 
 def compute_atr(df: pd.DataFrame, period: int = 14, name: str | None = None,
                 pane: str = "atr", color: str | None = None) -> IndicatorSeries:
-    # SymbolIndicators: tr = max(H-L, |H-prevC|, |L-prevC|), then tail(period).mean()
-    high = df["high"]
-    low = df["low"]
-    prev_close = df["close"].shift(1)
-    tr1 = high - low
-    tr2 = (high - prev_close).abs()
-    tr3 = (low - prev_close).abs()
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    atr = tr.rolling(period, min_periods=period).mean()
+    col = ti.compute(df, "atr", {"period": period}).iloc[:, 0]
     return IndicatorSeries(
         name=name or f"ATR({period})", pane=pane, kind=SeriesKind.LINE,
-        data=ScalarSeries(data=atr.fillna(np.nan).tolist()), color=color or "#AB47BC",
+        data=ScalarSeries(data=col.tolist()), color=color or "#AB47BC",
     )
 
 
@@ -207,7 +139,6 @@ INDICATOR_REGISTRY: dict[str, Callable] = {
     "boll": compute_boll,
     "macd": compute_macd,
     "rsi": compute_rsi,
-    "kdj": compute_kdj,
     "atr": compute_atr,
     "volume": compute_volume,
 }
@@ -218,3 +149,32 @@ def compute_indicator(df: pd.DataFrame, kind: str, params: dict) -> IndicatorSer
     if fn is None:
         raise ValueError(f"Unknown indicator: {kind!r}. Available: {list(INDICATOR_REGISTRY)}")
     return fn(df, **params)
+
+
+# --- Batch pre-computation -------------------------------------------------
+
+# 每种图层对应的 core-ti 指标规格（仅作性能预热用；正确性不依赖此表：
+# 即便参数与实际调用略有出入，也只是少一次预热、compute_indicator 会自行补算）。
+_PREWARM_SPECS: dict[str, Callable[[dict], tuple[str, dict]]] = {
+    "ma": lambda p: ("sma", {"period": p.get("period", 5)}),
+    "ema": lambda p: ("ema", {"period": p.get("period", 20)}),
+    "boll": lambda p: ("bb", {"period": p.get("period", 20), "std": p.get("std_dev", 2.0)}),
+    "macd": lambda p: ("macd", {"fast": p.get("fast", 12), "slow": p.get("slow", 26), "signal": p.get("signal", 9)}),
+    "rsi": lambda p: ("rsi", {"period": p.get("period", 14)}),
+    "atr": lambda p: ("atr", {"period": p.get("period", 14)}),
+}
+
+
+def enrich_for_layers(df: pd.DataFrame, layers) -> pd.DataFrame:
+    """为一组图层一次性预计算全部 core-ti 指标列，返回带列的 df 副本。
+
+    对返回值再调用 :func:`compute_indicator` 时会直接复用已算好的列，避免逐个
+    指标重复拷贝数据。*layers* 中的每项需带 ``indicator`` 与 ``params`` 属性。
+    """
+    specs: list[tuple[str, dict]] = []
+    for spec in layers:
+        factory = _PREWARM_SPECS.get(spec.indicator)
+        if factory is not None:
+            specs.append(factory(spec.params))
+    return ti.compute_many(df, specs)
+

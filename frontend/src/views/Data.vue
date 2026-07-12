@@ -104,7 +104,6 @@ const indicatorOptions = [
   { key: 'boll', label: 'BOLL' },
   { key: 'macd', label: 'MACD' },
   { key: 'rsi', label: 'RSI' },
-  { key: 'kdj', label: 'KDJ' },
   { key: 'atr', label: 'ATR' },
   { key: 'volume', label: 'Volume' },
 ]
@@ -141,9 +140,6 @@ const buildLayers = () => {
   }
   if (active.has('rsi')) {
     layers.push({ indicator: 'rsi', name: 'RSI(14)', params: { period: 14 } })
-  }
-  if (active.has('kdj')) {
-    layers.push({ indicator: 'kdj', name: 'KDJ(9,3,3)', params: { n: 9, m1: 3, m2: 3 } })
   }
   if (active.has('atr')) {
     layers.push({ indicator: 'atr', name: 'ATR(14)', params: { period: 14 } })

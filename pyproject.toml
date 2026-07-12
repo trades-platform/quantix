@@ -19,11 +19,16 @@ dependencies = [
     "amazingdata>=1.0.17",
     "tgw>=1.0.8.1",
     "scipy",  # AmazingData 未在 wheel 中声明 Requires-Dist，需显式补上
+    # 统一技术指标计算引擎（单一真实源），与 bit-market 共用同一实现
+    "core-ti",
 ]
 
 [tool.uv]
 # 本地 wheel 索引：tgw / amazingdata 从 wheels/ 解析，避免 uv sync 误删
 find-links = ["wheels"]
+
+[tool.uv.sources]
+core-ti = { git = "ssh://git@github.com/trades-platform/core-ti.git", branch = "main" }
 
 [dependency-groups]
 dev = [

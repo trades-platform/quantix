@@ -1,14 +1,26 @@
-"""技术指标计算模块"""
+"""技术指标计算模块
+
+所有指标公式统一来自 core-ti（见 :mod:`backend.engine.ti`），本模块只负责
+把「逐 bar 标量」的回测访问方式适配到 core-ti 的向量化计算：在完整历史上按
+需计算并缓存整列指标，再按当前可见截止位置读取标量值。
+
+由于所有指标均为因果指标（第 t 根的值只依赖 ≤ t 的数据），在完整序列上计算
+后读取 ``current_idx - 1`` 位置的值，与只用 ``data[:current_idx]`` 计算的结果
+完全一致，因此不会引入前视偏差。
+"""
+
+import math
 
 import pandas as pd
-import numpy as np
+
+from backend.engine import ti
 
 
 class SymbolIndicators:
     """单个标的的技术指标计算器
 
-    使用 set_current_idx() 增量更新可见数据范围，
-    避免每根 bar 重建对象和全量重算。
+    使用 set_current_idx() 增量更新可见数据范围。指标整列由 core-ti 计算并
+    缓存到工作副本，逐 bar 访问只做一次数组取值，无需重复计算。
     """
 
     def __init__(self, data: pd.DataFrame):
@@ -17,17 +29,20 @@ class SymbolIndicators:
         Args:
             data: 完整历史K线数据，包含列: timestamp, open, high, low, close, volume
         """
-        self._data = data
-        self._current_idx = len(data)
+        # 独立工作副本，用于原地累加 core-ti 计算出的指标列
+        self._work = data.reset_index(drop=True).copy()
+        self._current_idx = len(self._work)
 
     def set_current_idx(self, idx: int):
         """设置当前可见数据的截止行索引（不含 idx）"""
         self._current_idx = idx
 
-    @property
-    def _visible(self) -> pd.DataFrame:
-        """当前可见的数据切片"""
-        return self._data.iloc[:self._current_idx]
+    def _value(self, col: str) -> float:
+        """读取指标列在当前可见截止位置（current_idx - 1）的标量值"""
+        i = self._current_idx - 1
+        if i < 0 or i >= len(self._work):
+            return float("nan")
+        return float(self._work[col].iloc[i])
 
     def ma(self, period: int) -> float:
         """简单移动平均线
@@ -38,10 +53,11 @@ class SymbolIndicators:
         Returns:
             MA 值，数据不足时返回 0.0
         """
-        data = self._visible
-        if len(data) < period:
+        if self._current_idx < period:
             return 0.0
-        return float(data["close"].tail(period).mean())
+        (col,) = ti.ensure_columns(self._work, "sma", {"period": period})
+        val = self._value(col)
+        return 0.0 if math.isnan(val) else val
 
     def ema(self, period: int) -> float:
         """指数移动平均线
@@ -52,10 +68,11 @@ class SymbolIndicators:
         Returns:
             EMA 值，数据不足时返回 0.0
         """
-        data = self._visible
-        if len(data) < period:
+        if self._current_idx < period:
             return 0.0
-        return float(data["close"].ewm(span=period, adjust=False).mean().iloc[-1])
+        (col,) = ti.ensure_columns(self._work, "ema", {"period": period})
+        val = self._value(col)
+        return 0.0 if math.isnan(val) else val
 
     def macd(self, fast: int = 12, slow: int = 26, signal: int = 9) -> tuple[float, float, float]:
         """MACD 指标
@@ -68,25 +85,15 @@ class SymbolIndicators:
         Returns:
             (macd_line, signal_line, histogram)
         """
-        data = self._visible
-        if len(data) < slow + signal:
+        if self._current_idx < slow + signal:
             return (0.0, 0.0, 0.0)
-
-        close = data["close"]
-        ema_fast = close.ewm(span=fast, adjust=False).mean()
-        ema_slow = close.ewm(span=slow, adjust=False).mean()
-        macd_line = ema_fast - ema_slow
-        signal_line = macd_line.ewm(span=signal, adjust=False).mean()
-        histogram = macd_line - signal_line
-
-        return (
-            float(macd_line.iloc[-1]),
-            float(signal_line.iloc[-1]),
-            float(histogram.iloc[-1]),
+        line_col, signal_col, hist_col = ti.ensure_columns(
+            self._work, "macd", {"fast": fast, "slow": slow, "signal": signal}
         )
+        return (self._value(line_col), self._value(signal_col), self._value(hist_col))
 
     def rsi(self, period: int = 14) -> float:
-        """相对强弱指标
+        """相对强弱指标（Wilder 平滑）
 
         Args:
             period: 周期
@@ -94,26 +101,10 @@ class SymbolIndicators:
         Returns:
             RSI 值 (0-100)，数据不足时返回 NaN
         """
-        data = self._visible
-        if len(data) < period * 2:
-            return np.nan
-
-        close = data["close"].tail(period * 2)
-        delta = close.diff()
-
-        gain = delta.where(delta > 0, 0.0)
-        loss = -delta.where(delta < 0, 0.0)
-
-        avg_gain = gain.tail(period).mean()
-        avg_loss = loss.tail(period).mean()
-
-        if avg_loss == 0:
-            return 100.0
-
-        rs = avg_gain / avg_loss
-        rsi = 100 - (100 / (1 + rs))
-
-        return float(rsi)
+        if self._current_idx < period:
+            return float("nan")
+        (col,) = ti.ensure_columns(self._work, "rsi", {"period": period})
+        return self._value(col)
 
     def boll(self, period: int = 20, std_dev: float = 2.0) -> tuple[float, float, float]:
         """布林带
@@ -125,20 +116,15 @@ class SymbolIndicators:
         Returns:
             (upper, middle, lower)
         """
-        data = self._visible
-        if len(data) < period:
-            return (np.nan, np.nan, np.nan)
-
-        close_tail = data["close"].tail(period)
-        middle = float(close_tail.mean())
-        std = float(close_tail.std(ddof=0))
-        upper = middle + std_dev * std
-        lower = middle - std_dev * std
-
-        return (upper, middle, lower)
+        if self._current_idx < period:
+            return (float("nan"), float("nan"), float("nan"))
+        upper_col, mid_col, lower_col = ti.ensure_columns(
+            self._work, "bb", {"period": period, "std": std_dev}
+        )
+        return (self._value(upper_col), self._value(mid_col), self._value(lower_col))
 
     def atr(self, period: int = 14) -> float:
-        """平均真实波幅
+        """平均真实波幅（Wilder 平滑）
 
         Args:
             period: 周期
@@ -146,64 +132,7 @@ class SymbolIndicators:
         Returns:
             ATR 值，数据不足时返回 NaN
         """
-        data = self._visible
-        if len(data) < period + 1:
-            return np.nan
-
-        high = data["high"]
-        low = data["low"]
-        close = data["close"]
-
-        prev_close = close.shift(1)
-
-        tr1 = high - low
-        tr2 = (high - prev_close).abs()
-        tr3 = (low - prev_close).abs()
-
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-
-        atr = tr.tail(period).mean()
-
-        return float(atr)
-
-    def kdj(self, n: int = 9, m1: int = 3, m2: int = 3) -> tuple[float, float, float]:
-        """随机指标 (KDJ)
-
-        Args:
-            n: RSV 周期
-            m1: K 值平滑周期
-            m2: D 值平滑周期
-
-        Returns:
-            (K, D, J)
-        """
-        data = self._visible
-        if len(data) < n + m1 + m2:
-            return (np.nan, np.nan, np.nan)
-
-        # 需要足够的历史数据来累积 K/D
-        lookback = n + m1 + m2
-        visible_tail = data.tail(lookback)
-
-        k = 50.0
-        d = 50.0
-
-        alpha_k = 1.0 / m1
-        alpha_d = 1.0 / m2
-
-        for i in range(n - 1, len(visible_tail)):
-            window = visible_tail.iloc[max(0, i - n + 1):i + 1]
-            highest = window["high"].max()
-            lowest = window["low"].min()
-
-            if highest == lowest:
-                rsv = 50.0
-            else:
-                rsv = 100.0 * (visible_tail["close"].iloc[i] - lowest) / (highest - lowest)
-
-            k = (1 - alpha_k) * k + alpha_k * rsv
-            d = (1 - alpha_d) * d + alpha_d * k
-
-        j = 3 * k - 2 * d
-
-        return (float(k), float(d), float(j))
+        if self._current_idx < period + 1:
+            return float("nan")
+        (col,) = ti.ensure_columns(self._work, "atr", {"period": period})
+        return self._value(col)

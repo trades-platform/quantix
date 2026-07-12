@@ -96,15 +96,6 @@ def test_atr(price_data):
     assert atr > 0
 
 
-def test_kdj(price_data):
-    """KDJ 返回 (K, D, J) 三元组"""
-    ind = SymbolIndicators(price_data)
-    k, d, j = ind.kdj()
-    assert isinstance(k, float)
-    assert isinstance(d, float)
-    assert isinstance(j, float)
-
-
 def test_no_look_ahead_bias(price_data):
     """验证无前视偏差：只用尾部数据计算"""
     full_ind = SymbolIndicators(price_data)

@@ -5,7 +5,7 @@
  *   trades:     [{ side: 'buy'|'sell', price, timestamp }, ...]
  *
  * Pane layout: pane 0 = price (with 'main' LINE/BAND overlays); then 'volume';
- * then any other named panes (macd/rsi/kdj/atr/equity/drawdown) in first-seen
+ * then any other named panes (macd/rsi/atr/equity/drawdown) in first-seen
  * order. Indicator `kind` ∈ line|histogram|band|markers; `data.type` ∈ scalar|band.
  *
  * Interaction (ported from bit-market's lightweightRenderer):
@@ -22,7 +22,7 @@ import {
   createSeriesMarkers,
 } from 'lightweight-charts'
 
-// Band sub-line palette (for BOLL upper/lower, KDJ k/d/j, etc.)
+// Band sub-line palette (for BOLL upper/lower, MACD dif/dea, etc.)
 const SUB_COLORS = ['#2196F3', '#FF9800', '#AB47BC', '#26a69a', '#ef5350']
 
 function themeColors(dark) {

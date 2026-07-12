@@ -33,11 +33,13 @@ class ChartBuilder:
         self._indicators_cache = None
 
     def _build_indicators(self) -> list[IndicatorSeries]:
-        from backend.plotting.compute import compute_equity_curve, compute_drawdown, compute_indicator
+        from backend.plotting.compute import compute_equity_curve, compute_drawdown, compute_indicator, enrich_for_layers
 
         series = list(self._custom_indicators)
+        # 一次性预计算所有图层的指标列，后续 compute_indicator 直接复用
+        enriched = enrich_for_layers(self.kline_df, self.config.layers)
         for spec in self.config.layers:
-            ind = compute_indicator(self.kline_df, spec.indicator, spec.params)
+            ind = compute_indicator(enriched, spec.indicator, spec.params)
             if spec.pane is not None:
                 ind.pane = spec.pane
             if spec.kind is not None:
