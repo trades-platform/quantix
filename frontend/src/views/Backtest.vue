@@ -225,8 +225,12 @@ onMounted(() => {
                 :disabled="loading"
               >
                 <option value="">请选择标的</option>
-                <option v-for="symbol in symbols" :key="symbol" :value="symbol">
-                  {{ symbol }}
+                <option
+                  v-for="item in symbols"
+                  :key="typeof item === 'string' ? item : item.symbol"
+                  :value="typeof item === 'string' ? item : item.symbol"
+                >
+                  {{ typeof item === 'string' ? item : (item.name ? `${item.symbol} · ${item.name}` : item.symbol) }}
                 </option>
               </select>
               <p v-if="formErrors.symbol" class="text-sm text-red-600 mt-1">
