@@ -30,7 +30,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="p-8">
+  <div class="p-4 sm:p-6 lg:p-8">
     <!-- 页面标题 -->
     <div class="mb-8">
       <h1 class="text-3xl font-bold text-gray-900">仪表盘</h1>

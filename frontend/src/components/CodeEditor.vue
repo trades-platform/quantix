@@ -3,9 +3,29 @@ import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { EditorView, keymap } from '@codemirror/view'
 import { EditorState, EditorSelection, Compartment } from '@codemirror/state'
 import { python } from '@codemirror/lang-python'
-import { oneDark } from '@codemirror/theme-one-dark'
+import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { indentWithTab } from '@codemirror/commands'
 import { lineNumbers } from '@codemirror/view'
+
+// Light editor chrome: soft surface, subtle gutter, blue selection.
+const lightTheme = EditorView.theme(
+  {
+    '&': { backgroundColor: '#ffffff', color: '#0f172a' },
+    '.cm-content': { caretColor: '#2563eb' },
+    '.cm-cursor, .cm-dropCursor': { borderLeftColor: '#2563eb' },
+    '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection':
+      { backgroundColor: '#dbeafe !important' },
+    '.cm-gutters': {
+      backgroundColor: '#f8fafc',
+      color: '#94a3b8',
+      border: 'none',
+      borderRight: '1px solid #e2e8f0',
+    },
+    '.cm-activeLineGutter': { backgroundColor: '#eff6ff', color: '#2563eb' },
+    '.cm-activeLine': { backgroundColor: 'rgba(59, 130, 246, 0.06)' },
+  },
+  { dark: false }
+)
 
 const props = defineProps({
   modelValue: {
@@ -82,7 +102,8 @@ const createState = (doc) => {
     doc,
     extensions: [
       lineNumbers(),
-      oneDark,
+      lightTheme,
+      syntaxHighlighting(defaultHighlightStyle),
       getLanguageExtension(),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
@@ -155,7 +176,7 @@ watch(
 <template>
   <div
     :class="[
-      isFullscreen ? 'fixed inset-0 z-50 bg-gray-900 p-4' : 'relative h-full',
+      isFullscreen ? 'fixed inset-0 z-50 bg-slate-100 p-4' : 'relative h-full',
     ]"
   >
     <div
@@ -164,7 +185,7 @@ watch(
     >
       <button
         type="button"
-        class="text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 p-1.5 rounded transition-colors"
+        class="text-slate-500 hover:text-blue-600 bg-white hover:bg-slate-100 border border-slate-200 p-1.5 rounded shadow-sm transition-colors"
         :title="isFullscreen ? '退出全屏' : '全屏'"
         @click="toggleFullscreen"
       >
@@ -203,13 +224,13 @@ watch(
           <path d="M16 21v-3a2 2 0 0 1 2-2h3" />
         </svg>
       </button>
-      <span class="text-xs text-gray-400 bg-gray-800 px-2 py-1 rounded">
+      <span class="text-xs text-slate-500 bg-white border border-slate-200 px-2 py-1 rounded shadow-sm">
         行 {{ cursorPosition.line }}, 列 {{ cursorPosition.column }}
       </span>
     </div>
     <div
       ref="editorContainer"
-      class="w-full h-full overflow-auto rounded-lg border border-gray-700"
+      class="w-full h-full overflow-auto rounded-lg border border-slate-200"
       :class="{ 'opacity-75': readonly }"
       :style="{ '--cm-font-size': isFullscreen ? '20px' : '14px' }"
     ></div>

@@ -1,5 +1,50 @@
 @import "tailwindcss";
 
+/*
+ * Light theme design tokens.
+ * Central place for background layers, brand color, borders, text hierarchy,
+ * radii and shadows. Components reference these instead of hardcoding values.
+ */
+@theme {
+  /* Brand (blue) scale used for primary actions & active states */
+  --color-brand-50: #eff6ff;
+  --color-brand-100: #dbeafe;
+  --color-brand-200: #bfdbfe;
+  --color-brand-500: #3b82f6;
+  --color-brand-600: #2563eb;
+  --color-brand-700: #1d4ed8;
+
+  /* Semantic radii */
+  --radius-card: 0.75rem;
+
+  /* Semantic shadows tuned for light surfaces */
+  --shadow-card: 0 1px 2px 0 rgb(15 23 42 / 0.04), 0 1px 3px 0 rgb(15 23 42 / 0.06);
+  --shadow-card-hover: 0 4px 12px -2px rgb(15 23 42 / 0.10), 0 2px 6px -2px rgb(15 23 42 / 0.06);
+}
+
+:root {
+  /* Background layers */
+  --app-bg: #f8fafc;          /* app canvas (slate-50) */
+  --app-bg-alt: #f1f5f9;      /* subtle alt canvas (slate-100) */
+  --surface: #ffffff;         /* cards / panels */
+  --surface-muted: #f8fafc;   /* inset areas */
+
+  /* Borders */
+  --border: #e2e8f0;          /* slate-200 */
+  --border-strong: #cbd5e1;   /* slate-300 */
+
+  /* Text hierarchy */
+  --text-strong: #0f172a;     /* slate-900 headings */
+  --text: #334155;            /* slate-700 body */
+  --text-muted: #64748b;      /* slate-500 secondary */
+  --text-subtle: #94a3b8;     /* slate-400 hints */
+
+  /* Primary */
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-soft: #eff6ff;
+}
+
 @layer base {
   html {
     scroll-behavior: smooth;
@@ -9,11 +54,13 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    background-color: var(--app-bg);
+    color: var(--text);
   }
 
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
   }
 
   ::-webkit-scrollbar-track {
@@ -22,7 +69,7 @@
 
   ::-webkit-scrollbar-thumb {
     background: #cbd5e1;
-    border-radius: 3px;
+    border-radius: 4px;
   }
 
   ::-webkit-scrollbar-thumb:hover {

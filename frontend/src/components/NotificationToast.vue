@@ -8,10 +8,10 @@ const { notifications } = storeToRefs(notificationStore)
 
 const getTypeStyles = (type) => {
   const styles = {
-    success: 'bg-green-500',
-    error: 'bg-red-500',
-    warning: 'bg-yellow-500',
-    info: 'bg-blue-500'
+    success: 'bg-emerald-600',
+    error: 'bg-red-600',
+    warning: 'bg-amber-500',
+    info: 'bg-blue-600'
   }
   return styles[type] || styles.info
 }

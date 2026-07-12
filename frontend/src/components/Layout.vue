@@ -22,9 +22,9 @@ const isActive = (href) => {
 <template>
   <div class="flex h-screen">
     <!-- 侧边栏 -->
-    <aside class="w-64 bg-slate-900 text-white flex flex-col flex-shrink-0">
+    <aside class="w-64 bg-white text-slate-700 flex flex-col flex-shrink-0 border-r border-slate-200">
       <!-- Logo 区域 - 渐变色 -->
-      <div class="px-6 py-5 bg-gradient-to-r from-blue-800 to-blue-600">
+      <div class="px-6 py-5 bg-gradient-to-r from-blue-700 to-blue-600">
         <div class="flex items-center space-x-3">
           <div class="w-9 h-9 bg-white/20 rounded-lg flex items-center justify-center backdrop-blur-sm">
             <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -32,8 +32,8 @@ const isActive = (href) => {
             </svg>
           </div>
           <div>
-            <h1 class="text-xl font-bold tracking-wide">Quantix</h1>
-            <p class="text-xs text-blue-200/80">量化回测平台</p>
+            <h1 class="text-xl font-bold tracking-wide text-white">Quantix</h1>
+            <p class="text-xs text-blue-100/90">量化回测平台</p>
           </div>
         </div>
       </div>
@@ -46,13 +46,13 @@ const isActive = (href) => {
               :to="item.href"
               class="group relative flex items-center px-3 py-2.5 rounded-lg transition-all duration-200 ease-out"
               :class="isActive(item.href)
-                ? 'bg-blue-600/20 text-blue-400'
-                : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'"
+                ? 'bg-blue-50 text-blue-700'
+                : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'"
             >
               <!-- 左侧高亮条 -->
               <span
                 class="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full transition-all duration-200"
-                :class="isActive(item.href) ? 'bg-blue-400 opacity-100' : 'bg-transparent opacity-0 group-hover:bg-slate-600 group-hover:opacity-100'"
+                :class="isActive(item.href) ? 'bg-blue-600 opacity-100' : 'bg-transparent opacity-0 group-hover:bg-slate-300 group-hover:opacity-100'"
               ></span>
               <svg class="w-5 h-5 mr-3 flex-shrink-0 transition-transform duration-200" :class="isActive(item.href) ? 'scale-110' : 'group-hover:scale-105'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="item.icon" />
@@ -64,13 +64,13 @@ const isActive = (href) => {
       </nav>
 
       <!-- 底部版本信息 -->
-      <div class="px-6 py-3 border-t border-slate-700/50">
-        <p class="text-[11px] text-slate-500 tracking-wide">v1.0.0</p>
+      <div class="px-6 py-3 border-t border-slate-200">
+        <p class="text-[11px] text-slate-400 tracking-wide">v1.0.0</p>
       </div>
     </aside>
 
     <!-- 主内容区 -->
-    <main class="flex-1 overflow-auto bg-gradient-to-br from-slate-50 to-gray-100">
+    <main class="flex-1 overflow-auto bg-slate-50">
       <RouterView />
     </main>
   </div>

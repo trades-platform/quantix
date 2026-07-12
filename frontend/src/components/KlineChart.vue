@@ -21,7 +21,7 @@ const props = defineProps({
   },
   darkMode: {
     type: Boolean,
-    default: true,
+    default: false,
   },
 })
 
