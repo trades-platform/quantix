@@ -54,9 +54,6 @@ const dateRangeError = computed(() => {
   if (daysDiff < 7) {
     return '回测期间至少需要7天'
   }
-  if (daysDiff > 365 * 5) {
-    return '回测期间不能超过5年'
-  }
   return ''
 })
 
